@@ -1,0 +1,21 @@
+{
+  "name": "lybid",
+  "private": true,
+  "version": "0.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "api": "pnpm --filter api",
+    "dev": "pnpm --filter api start:dev",
+    "build": "pnpm --filter api build",
+    "lint": "pnpm --filter api lint",
+    "test": "pnpm --filter api test",
+    "test:e2e": "pnpm --filter api test:e2e",
+    "prisma:migrate": "pnpm --filter api prisma:migrate",
+    "prisma:seed": "pnpm --filter api prisma:seed",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down"
+  }
+}

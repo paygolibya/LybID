@@ -1,0 +1,103 @@
+// LybID — Phase 0 schema.
+// DATABASE_URL (owner role) is used for migrations. The running app connects
+// with RUNTIME_DATABASE_URL (the non-owner `lybid_app` role) so that the RLS
+// policies created in migration 2_rls_setup actually apply to it.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum ApiKeyEnvironment {
+  LIVE
+  TEST
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum AdminRole {
+  PLATFORM_ADMIN
+}
+
+model Tenant {
+  id        String       @id @default(uuid())
+  name      String
+  slug      String       @unique
+  status    TenantStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  deletedAt DateTime?
+
+  apiKeys ApiKey[]
+
+  @@map("tenants")
+}
+
+model ApiKey {
+  id        String            @id @default(uuid())
+  tenantId  String
+  tenant    Tenant            @relation(fields: [tenantId], references: [id])
+
+  // First ~8 chars of the token, stored in the clear for lookup/display
+  // (e.g. "lyb_live_a1b2c3d4"). Never enough entropy to be usable alone.
+  keyPrefix String            @unique
+
+  // HMAC-SHA256(API_KEY_PEPPER, fullToken) — the token has 256 bits of
+  // entropy, so a fast keyed hash is correct here (not bcrypt, which is
+  // for low-entropy human passwords).
+  keyHash   String
+
+  environment     ApiKeyEnvironment
+  scopes          String[]          @default([])
+  status          ApiKeyStatus      @default(ACTIVE)
+  expiresAt       DateTime?
+  createdByAdminId String?
+  createdByAdmin  PlatformAdminUser? @relation(fields: [createdByAdminId], references: [id])
+  lastUsedAt      DateTime?
+  createdAt       DateTime          @default(now())
+  revokedAt       DateTime?
+
+  @@index([tenantId])
+  @@map("api_keys")
+}
+
+model PlatformAdminUser {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  role         AdminRole @default(PLATFORM_ADMIN)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  issuedApiKeys ApiKey[]
+
+  @@map("platform_admin_users")
+}
+
+// Schema-only for Phase 0 — no retention/deletion policy yet (that is a
+// Phase 8 decision). Written to on tenant create and api-key issue/revoke.
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorType  String
+  actorId    String
+  action     String
+  targetType String
+  targetId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@map("audit_logs")
+}
