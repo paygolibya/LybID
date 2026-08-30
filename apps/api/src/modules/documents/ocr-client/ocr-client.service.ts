@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../../../config/env.validation';
-import type { DocumentType } from '@prisma/client';
+import type { BusinessDocumentType, DocumentType } from '@prisma/client';
 
 export interface ExtractedField {
   name: string;
@@ -31,8 +31,12 @@ export class OcrClientService {
     this.baseUrl = config.get('OCR_SERVICE_URL', { infer: true });
   }
 
+  // Shared verbatim by BusinessDocumentsService (Phase 3) — the sidecar
+  // only ever sees this as a plain string field (document_type) and
+  // dispatches on its value, so accepting either Prisma enum here is
+  // correct, not just conveniently permissive.
   async extract(
-    documentType: DocumentType,
+    documentType: DocumentType | BusinessDocumentType,
     fileBuffer: Buffer,
     mimeType: string,
     filename: string,

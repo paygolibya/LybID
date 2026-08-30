@@ -103,7 +103,7 @@ export function getOwnerClient(): PrismaClient {
 
 export async function resetDatabase(owner: PrismaClient): Promise<void> {
   await owner.$executeRawUnsafe(
-    'TRUNCATE TABLE audit_logs, biometric_checks, document_extractions, documents, applicants, api_keys, tenants, platform_admin_users RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE audit_logs, biometric_checks, business_document_extractions, business_documents, businesses, document_extractions, documents, applicants, api_keys, tenants, platform_admin_users RESTART IDENTITY CASCADE',
   );
 }
 
@@ -191,6 +191,20 @@ export async function createApplicant(
 ): Promise<string> {
   const res = await request(app.getHttpServer())
     .post('/v1/applicants')
+    .set('X-API-Key', apiKeyToken)
+    .send(body)
+    .expect(201);
+  return res.body.id as string;
+}
+
+/** Phase 3 (KYB) — mirrors createApplicant exactly. */
+export async function createBusiness(
+  app: INestApplication,
+  apiKeyToken: string,
+  body: Record<string, unknown> = {},
+): Promise<string> {
+  const res = await request(app.getHttpServer())
+    .post('/v1/businesses')
     .set('X-API-Key', apiKeyToken)
     .send(body)
     .expect(201);

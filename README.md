@@ -145,6 +145,25 @@ Verified against the real (not stubbed) `/verify` endpoint with a dummy non-face
 
 With all four fixed: **face match is fully verified** — `faceMatchVerdict: MATCH`, correctly identifying the same person across their real passport photo and real selfie. **Liveness is structurally correct and verified working** (real two-model ensemble, matching the official algorithm exactly, tested to be genuinely input-sensitive) **but has an unresolved real-world accuracy gap**: on this one real selfie, it returned `livenessVerdict: SPOOF` at a low score, landing the overall check at `NEEDS_REVIEW` (the correct, safe outcome for a low-confidence result — not a crash or a wrong hard-fail). This is very plausibly the well-documented cross-domain generalization weakness of small anti-spoofing models (trained on a specific dataset's lighting/camera/demographic distribution, which this one real test photo may fall outside of) rather than a remaining integration bug — everything integration-side has now been checked against the official source rather than assumed. Same posture as Phase 1's birth-certificate caveat: real, working, end-to-end, but not yet trustworthy enough to skip manual review on `SPOOF`/`NEEDS_REVIEW` liveness results. A second real test photo (different lighting/camera/person) would help tell "generalization gap" apart from "still something integration-side" — worth doing before relying on this for a real decisioning workflow (Phase 4).
 
+## Phase 3 — KYB (Business Verification)
+
+A tenant registers a `Business` (a company, not a person) — a new top-level entity, created directly like `Applicant`, not nested under one — and uploads its business documents (Commercial Registration Certificate, Chamber of Commerce Certificate, Tax ID/Tax Card). Each is OCR'd the same way passport/birth-certificate documents are in Phase 1: `202` immediately, a BullMQ worker calls the OCR sidecar and writes results, client polls for status. Deliberately a **parallel** set of tables (`Business`, `BusinessDocument`, `BusinessDocumentExtraction`) rather than a generalized/nullable-FK reuse of `Applicant`/`Document` — `Document.applicantId` is a required FK on an already-migrated, RLS-hardened, tested table, and Phase 2's `BiometricCheck` faced the identical fork and also chose a new table over modifying `Document`.
+
+### Setup (in addition to Phase 2's)
+
+```bash
+# no new prerequisites — same MinIO/Redis/OCR-sidecar infra as Phase 1, reused as-is
+pnpm --filter api prisma:migrate   # applies the new businesses/business_documents schema + RLS migrations
+```
+
+### Testing
+
+`business-verification.e2e-spec.ts` stubs `OcrClientService` (the same client Phase 1 uses — `DocumentsModule` now exports it for reuse, same precedent as `StorageService`'s Phase 2 reuse by `BiometricChecksModule`). Covers: upload → async OCR → `EXTRACTED`/`NEEDS_REVIEW` per confidence threshold, `FAILED`+retry on sidecar error, wrong-mime-type 400, cross-tenant 404s (both for document upload and for fetching a business directly). `services/ocr` gained three new extractors (`commercial_registration.py`, `chamber_of_commerce.py`, `tax_id.py`) sharing a new `arabic_form.py` module — the same keyword-anchored algorithm `birth_certificate.py` already used, factored out so the three new types don't each carry a near-duplicate copy (`birth_certificate.py` itself was left untouched, to avoid any risk to already-verified Phase 1 code).
+
+**Real bug found while writing the fixtures for the three new extractors, worth recording**: an early version of each extractor's keyword list used only full 2-word Arabic label phrases (e.g. `"اسم الشركة"`) and found zero fields, even on a clean synthetic render with correct raw OCR text. Tesseract's word-level bounding boxes split most 2-word Arabic labels into separate tokens — a keyword that's only the full phrase can never be a substring of either token alone. `birth_certificate.py` avoids this by accident in places (some of its fields pair a full phrase with a single-word fallback, some don't — its own test only asserts "found *something*", so it never caught the fields that silently never match). Fixed by explicitly pairing every keyword with a single-word fallback in all three new extractors. Worth checking for the same issue if `birth_certificate.py`'s own field-level accuracy is ever tuned against a real sample.
+
+**Same honest caveat as Phase 1's birth-certificate extraction**: the label keywords for all three new document types are best-guess Arabic terminology, **unverified against a real document** (no real KYB sample was available while building this). The pipeline runs correctly end-to-end (upload → OCR → structured response), but field-level accuracy needs tuning against a real (redacted) sample before Phase 4 (decisioning) could rely on it — don't treat a `status: EXTRACTED` on a KYB document as a high-confidence result yet, same as the birth-certificate caveat.
+
 ### Roadmap
 
 0. Scaffolding & multi-tenant core (this phase)

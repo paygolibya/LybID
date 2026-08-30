@@ -24,6 +24,10 @@ import { StorageService } from './storage/storage.service';
     ExtractionProcessor,
     OcrClientService,
   ],
-  exports: [DocumentsService, StorageService],
+  // OcrClientService exported so BusinessDocumentsModule can reuse it
+  // (Phase 3) — same reason StorageService is already exported, precedent
+  // set by BiometricChecksModule importing this module for StorageService
+  // in Phase 2.
+  exports: [DocumentsService, StorageService, OcrClientService],
 })
 export class DocumentsModule {}

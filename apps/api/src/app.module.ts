@@ -11,6 +11,8 @@ import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { ApplicantsModule } from './modules/applicants/applicants.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { BiometricChecksModule } from './modules/biometric-checks/biometric-checks.module';
+import { BusinessDocumentsModule } from './modules/business-documents/business-documents.module';
+import { BusinessesModule } from './modules/businesses/businesses.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { HealthModule } from './modules/health/health.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
@@ -30,6 +32,8 @@ import { QueueModule } from './queue/queue.module';
     ApplicantsModule,
     DocumentsModule,
     BiometricChecksModule,
+    BusinessesModule,
+    BusinessDocumentsModule,
     WhoamiModule,
   ],
   providers: [

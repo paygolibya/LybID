@@ -78,6 +78,17 @@ enum FaceMatchVerdict {
   UNKNOWN
 }
 
+enum BusinessStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum BusinessDocumentType {
+  COMMERCIAL_REGISTRATION
+  CHAMBER_OF_COMMERCE
+  TAX_ID
+}
+
 model Tenant {
   id        String       @id @default(uuid())
   name      String
@@ -89,6 +100,7 @@ model Tenant {
 
   apiKeys    ApiKey[]
   applicants Applicant[]
+  businesses Business[]
 
   @@map("tenants")
 }
@@ -264,6 +276,90 @@ model BiometricCheck {
   @@index([tenantId])
   @@index([applicantId])
   @@map("biometric_checks")
+}
+
+// Phase 3: a business being verified (KYB — "Know Your Business"), separate
+// from Applicant (a person). Deliberately a new top-level entity, created
+// directly by a tenant, not nested under an Applicant — a business isn't a
+// person, so forcing it under Applicant would be a misfit. Bank-declared
+// fields are for record-keeping only, same posture as Applicant's.
+model Business {
+  id          String            @id @default(uuid())
+  tenantId    String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id])
+  environment ApiKeyEnvironment
+
+  externalId                   String?
+  legalName                    String?
+  commercialRegistrationNumber String?
+
+  status    BusinessStatus @default(ACTIVE)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  deletedAt DateTime?
+
+  documents BusinessDocument[]
+
+  @@index([tenantId])
+  @@map("businesses")
+}
+
+// A single uploaded business document (commercial registration, chamber of
+// commerce, or tax ID) belonging to a Business. Deliberately a separate
+// table from Document rather than a generalized/nullable-FK reuse of it —
+// see the Phase 3 plan for why (Document.applicantId is a required FK on an
+// already-migrated, RLS-hardened, tested table; Phase 2's BiometricCheck
+// faced the identical fork and also chose a new table over modifying
+// Document).
+model BusinessDocument {
+  id          String               @id @default(uuid())
+  tenantId    String
+  businessId  String
+  business    Business             @relation(fields: [businessId], references: [id])
+  environment ApiKeyEnvironment
+
+  type   BusinessDocumentType
+  // Reuses Document's own DocumentStatus enum — its values (UPLOADED,
+  // PROCESSING, etc.) are generic, nothing applicant-specific about them.
+  status DocumentStatus @default(UPLOADED)
+
+  storageKey       String
+  originalFilename String
+  mimeType         String
+  fileSizeBytes    Int
+  sha256           String
+
+  uploadedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  extractions BusinessDocumentExtraction[]
+
+  @@index([tenantId])
+  @@index([businessId])
+  @@index([sha256])
+  @@map("business_documents")
+}
+
+// One OCR attempt against a BusinessDocument — mirrors DocumentExtraction
+// exactly, including reusing its ExtractionStatus enum.
+model BusinessDocumentExtraction {
+  id          String           @id @default(uuid())
+  tenantId    String
+  documentId  String
+  document    BusinessDocument @relation(fields: [documentId], references: [id])
+  environment ApiKeyEnvironment
+
+  engine  String
+  rawText String?
+  fields  Json?
+
+  overallConfidence Float?
+  status            ExtractionStatus
+  createdAt         DateTime         @default(now())
+
+  @@index([tenantId])
+  @@index([documentId])
+  @@map("business_document_extractions")
 }
 
 // Schema-only for Phase 0 — no retention/deletion policy yet (that is a

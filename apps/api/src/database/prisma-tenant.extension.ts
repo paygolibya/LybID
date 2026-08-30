@@ -29,6 +29,15 @@ export const TENANT_SCOPED_MODELS: Record<
     environmentField: 'environment',
   },
   BiometricCheck: { scopeField: 'tenantId', environmentField: 'environment' },
+  Business: { scopeField: 'tenantId', environmentField: 'environment' },
+  BusinessDocument: {
+    scopeField: 'tenantId',
+    environmentField: 'environment',
+  },
+  BusinessDocumentExtraction: {
+    scopeField: 'tenantId',
+    environmentField: 'environment',
+  },
 };
 
 const READ_OR_FILTER_OPERATIONS = new Set([

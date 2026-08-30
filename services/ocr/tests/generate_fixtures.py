@@ -136,6 +136,61 @@ def generate_birth_certificate_fixture() -> str:
     return path
 
 
+def _generate_arabic_form_fixture(filename: str, rows: list) -> str:
+    """Shared by the 3 Phase 3 (KYB) fixture generators below — same layout
+    convention as generate_birth_certificate_fixture (label box to the
+    right, value box to the left, per the RTL layout app/arabic_form.py
+    expects). `rows` is a list of (label, value, y) tuples."""
+    os.makedirs(FIXTURES_DIR, exist_ok=True)
+    path = os.path.join(FIXTURES_DIR, filename)
+
+    width, height = 1200, 900
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+
+    label_font = _load_arabic_font(28)
+    value_font = _load_arabic_font(28)
+
+    for label, value, y in rows:
+        draw.text((900, y), label, font=label_font, fill="black")
+        draw.text((300, y), value, font=value_font, fill="black")
+
+    image.save(path, "JPEG", quality=95)
+    return path
+
+
+def generate_commercial_registration_fixture() -> str:
+    rows = [
+        ("اسم الشركة", "شركة طرابلس للتجارة", 100),
+        ("رقم السجل", "12345", 180),
+        ("نوع النشاط", "تجارة عامة", 260),
+        ("تاريخ الإصدار", "2020", 340),
+    ]
+    return _generate_arabic_form_fixture("synthetic_commercial_registration.jpg", rows)
+
+
+def generate_chamber_of_commerce_fixture() -> str:
+    rows = [
+        ("اسم الشركة", "شركة طرابلس للتجارة", 100),
+        ("رقم العضوية", "6789", 180),
+        ("الغرفة التجارية", "غرفة طرابلس", 260),
+        ("تاريخ الانتهاء", "2027", 340),
+    ]
+    return _generate_arabic_form_fixture("synthetic_chamber_of_commerce.jpg", rows)
+
+
+def generate_tax_id_fixture() -> str:
+    rows = [
+        ("اسم الشركة", "شركة طرابلس للتجارة", 100),
+        ("الرقم الضريبي", "998877", 180),
+        ("تاريخ الإصدار", "2021", 260),
+    ]
+    return _generate_arabic_form_fixture("synthetic_tax_id.jpg", rows)
+
+
 if __name__ == "__main__":
     print(generate_passport_fixture())
     print(generate_birth_certificate_fixture())
+    print(generate_commercial_registration_fixture())
+    print(generate_chamber_of_commerce_fixture())
+    print(generate_tax_id_fixture())
