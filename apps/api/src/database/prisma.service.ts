@@ -7,7 +7,7 @@ import type {
   ExtendedPrismaClient,
   ScopedTransactionClient,
 } from './prisma-types';
-import { RequestContextService } from './tenant-context';
+import { RequestAuthContext, RequestContextService } from './tenant-context';
 
 /**
  * Owns two things:
@@ -70,6 +70,32 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.client.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.is_admin', 'true', true)`;
       return fn(tx);
+    });
+  }
+
+  /**
+   * The tenant-scoped entry point for non-HTTP code (BullMQ processors,
+   * cron, CLI scripts) — anything that needs the same guarantees an HTTP
+   * request gets (CLS auth context set, tenant-scoped transaction, RLS GUC)
+   * without a guard/interceptor to set them up first.
+   *
+   * Manufactures a fresh CLS context (`runInNewContext`), populates it the
+   * same way `ApiKeyGuard` + `RequestTransactionInterceptor` would for a
+   * real request, then hands the caller a scoped transaction. Callers can
+   * then use `requestContext.requireTx()` from ordinary application
+   * services exactly as HTTP handlers do — no parallel, weaker data-access
+   * path for background jobs.
+   */
+  async runAsTenant<T>(
+    auth: Extract<RequestAuthContext, { mode: 'tenant' }>,
+    fn: (tx: ScopedTransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return this.requestContext.runInNewContext(async () => {
+      this.requestContext.setAuth(auth);
+      return this.openTenantTransaction(auth.tenantId, async (tx) => {
+        this.requestContext.setTx(tx);
+        return fn(tx);
+      });
     });
   }
 }

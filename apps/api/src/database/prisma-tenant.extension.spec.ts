@@ -82,4 +82,63 @@ describe('applyTenantScoping', () => {
       args,
     );
   });
+
+  describe('environment scoping (models with environmentField, e.g. Applicant)', () => {
+    it('auto-injects both tenantId and environment on a read', () => {
+      const result = applyTenantScoping(
+        'Applicant',
+        'findMany',
+        {},
+        tenantAuth,
+      );
+      expect(result.where).toEqual({
+        tenantId: 'tenant-a',
+        environment: 'LIVE',
+      });
+    });
+
+    it('auto-injects both fields on create', () => {
+      const result = applyTenantScoping(
+        'Applicant',
+        'create',
+        { data: { externalId: 'cust-1' } },
+        tenantAuth,
+      );
+      expect(result.data).toEqual({
+        externalId: 'cust-1',
+        tenantId: 'tenant-a',
+        environment: 'LIVE',
+      });
+    });
+
+    it('throws if an explicit where clause targets a different environment (same tenant)', () => {
+      expect(() =>
+        applyTenantScoping(
+          'Applicant',
+          'findMany',
+          { where: { environment: 'TEST' } },
+          tenantAuth,
+        ),
+      ).toThrow(/scoping violation/i);
+    });
+
+    it('a TEST-environment key only sees its own environment', () => {
+      const testAuth: RequestAuthContext = {
+        ...tenantAuth,
+        environment: 'TEST',
+      };
+      const result = applyTenantScoping('Applicant', 'findMany', {}, testAuth);
+      expect(result.where).toEqual({
+        tenantId: 'tenant-a',
+        environment: 'TEST',
+      });
+    });
+
+    it('admin mode bypasses environment scoping too', () => {
+      const args = { where: {} };
+      expect(applyTenantScoping('Applicant', 'findMany', args, adminAuth)).toBe(
+        args,
+      );
+    });
+  });
 });

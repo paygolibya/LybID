@@ -9,3 +9,15 @@ coverage/
 .DS_Store
 Thumbs.db
 apps/api/generated/
+
+# Python (services/ocr)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Synthetic OCR test fixtures — regenerated on demand by
+# services/ocr/tests/generate_fixtures.py, not committed, so there's never
+# any ambiguity about whether a committed image is really synthetic.
+services/ocr/tests/fixtures/*.jpg
+services/ocr/tests/fixtures/*.png

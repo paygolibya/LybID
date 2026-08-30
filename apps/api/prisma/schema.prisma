@@ -31,6 +31,29 @@ enum AdminRole {
   PLATFORM_ADMIN
 }
 
+enum ApplicantStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum DocumentType {
+  PASSPORT
+  BIRTH_CERTIFICATE
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING
+  EXTRACTED
+  FAILED
+  NEEDS_REVIEW
+}
+
+enum ExtractionStatus {
+  COMPLETED
+  FAILED
+}
+
 model Tenant {
   id        String       @id @default(uuid())
   name      String
@@ -40,7 +63,8 @@ model Tenant {
   updatedAt DateTime     @updatedAt
   deletedAt DateTime?
 
-  apiKeys ApiKey[]
+  apiKeys    ApiKey[]
+  applicants Applicant[]
 
   @@map("tenants")
 }
@@ -84,6 +108,87 @@ model PlatformAdminUser {
   issuedApiKeys ApiKey[]
 
   @@map("platform_admin_users")
+}
+
+// Phase 1: an individual being verified. Bank-declared identity fields are
+// for the bank's own record-keeping only — never compared against OCR
+// results or used in decisioning (that's Phase 4 scope).
+model Applicant {
+  id          String            @id @default(uuid())
+  tenantId    String
+  tenant      Tenant            @relation(fields: [tenantId], references: [id])
+  environment ApiKeyEnvironment
+
+  externalId  String?
+  firstName   String?
+  lastName    String?
+  dateOfBirth DateTime?
+
+  status    ApplicantStatus @default(ACTIVE)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  deletedAt DateTime?
+
+  documents Document[]
+
+  @@index([tenantId])
+  @@map("applicants")
+}
+
+// A single uploaded document (passport or birth certificate) belonging to
+// an Applicant. Libyan banks require both document types per applicant.
+model Document {
+  id          String       @id @default(uuid())
+  tenantId    String
+  applicantId String
+  applicant   Applicant    @relation(fields: [applicantId], references: [id])
+  environment ApiKeyEnvironment
+
+  type   DocumentType
+  status DocumentStatus @default(UPLOADED)
+
+  storageKey       String
+  originalFilename String
+  mimeType         String
+  fileSizeBytes    Int
+  sha256           String
+
+  uploadedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  extractions DocumentExtraction[]
+
+  @@index([tenantId])
+  @@index([applicantId])
+  @@index([sha256])
+  @@map("documents")
+}
+
+// One OCR attempt against a Document. Kept separate from Document (not
+// columns on it) so re-extraction attempts have independent history — the
+// "current" extraction for a document is just the most recent row
+// (orderBy createdAt desc, take 1), not a separate flag to keep in sync.
+model DocumentExtraction {
+  id          String   @id @default(uuid())
+  tenantId    String
+  documentId  String
+  document    Document @relation(fields: [documentId], references: [id])
+  environment ApiKeyEnvironment
+
+  engine  String
+  rawText String?
+
+  // Structured key/value fields with per-field confidence, e.g.
+  // [{ "name": "surname", "value": "AL-FTAISI", "confidence": 0.94 }, ...]
+  fields Json?
+
+  overallConfidence Float?
+  status            ExtractionStatus
+  createdAt         DateTime         @default(now())
+
+  @@index([tenantId])
+  @@index([documentId])
+  @@map("document_extractions")
 }
 
 // Schema-only for Phase 0 — no retention/deletion policy yet (that is a

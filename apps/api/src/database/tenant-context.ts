@@ -63,4 +63,15 @@ export class RequestContextService {
     }
     return tx;
   }
+
+  /**
+   * Runs `fn` inside a brand new CLS (AsyncLocalStorage) context — the
+   * entry point non-HTTP code (BullMQ processors, cron, CLI scripts) must
+   * use before calling `setAuth`/`setTx`, since there is no request
+   * middleware to open one for them. See `PrismaService.runAsTenant`, the
+   * only current caller.
+   */
+  runInNewContext<T>(fn: () => Promise<T>): Promise<T> {
+    return this.cls.run(fn);
+  }
 }

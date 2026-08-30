@@ -3,16 +3,31 @@ import type { RequestAuthContext } from './tenant-context';
 
 /**
  * Per-model config for app-level auto-scoping. This is the *primary*
- * correctness layer (Postgres RLS, set up in the `2_rls_setup` migration, is
- * the DB-level defense-in-depth layer described in the Phase 0 plan).
+ * correctness layer (Postgres RLS, set up in the `rls_setup` migrations, is
+ * the DB-level defense-in-depth layer described in the Phase 0/1 plans).
  *
- * `scopeField` is the column on the model that identifies its tenant:
- * for most future models this will be `tenantId`; for `Tenant` itself it's
- * the row's own `id`.
+ * `scopeField` is the column on the model that identifies its tenant: for
+ * most models this is `tenantId`; for `Tenant` itself it's the row's own
+ * `id`.
+ *
+ * `environmentField`, if set, additionally auto-scopes the model by
+ * LIVE/TEST environment (app-layer only — see the Phase 1 plan for why this
+ * isn't mirrored at the RLS layer). Without this, a tenant's LIVE API key
+ * could read/enumerate that same tenant's TEST data (or vice versa) — a
+ * same-tenant PII leak class, lower severity than cross-tenant but real.
  */
-export const TENANT_SCOPED_MODELS: Record<string, { scopeField: string }> = {
+export const TENANT_SCOPED_MODELS: Record<
+  string,
+  { scopeField: string; environmentField?: string }
+> = {
   Tenant: { scopeField: 'id' },
   ApiKey: { scopeField: 'tenantId' },
+  Applicant: { scopeField: 'tenantId', environmentField: 'environment' },
+  Document: { scopeField: 'tenantId', environmentField: 'environment' },
+  DocumentExtraction: {
+    scopeField: 'tenantId',
+    environmentField: 'environment',
+  },
 };
 
 const READ_OR_FILTER_OPERATIONS = new Set([
@@ -33,20 +48,54 @@ const READ_OR_FILTER_OPERATIONS = new Set([
 const CREATE_OPERATIONS = new Set(['create']);
 const CREATE_MANY_OPERATIONS = new Set(['createMany']);
 
+/** field -> required value, e.g. { tenantId: 'abc', environment: 'LIVE' } */
+type ScopePairs = Record<string, string>;
+
+function scopePairsFor(
+  config: { scopeField: string; environmentField?: string },
+  auth: Extract<RequestAuthContext, { mode: 'tenant' }>,
+): ScopePairs {
+  const pairs: ScopePairs = { [config.scopeField]: auth.tenantId };
+  if (config.environmentField) {
+    pairs[config.environmentField] = auth.environment;
+  }
+  return pairs;
+}
+
 function mergeWhereScope(
+  model: string,
   where: unknown,
-  scopeField: string,
-  tenantId: string,
+  scope: ScopePairs,
 ): Record<string, unknown> {
   const existing = (where ?? {}) as Record<string, unknown>;
-  if (scopeField in existing && existing[scopeField] !== tenantId) {
-    throw new Error(
-      `Tenant scoping violation: query explicitly filtered ${scopeField}=${String(
-        existing[scopeField],
-      )} which does not match the authenticated tenant. Refusing to run.`,
-    );
+  for (const [field, value] of Object.entries(scope)) {
+    if (field in existing && existing[field] !== value) {
+      throw new Error(
+        `Tenant scoping violation: ${model} query explicitly filtered ${field}=${String(
+          existing[field],
+        )} which does not match the authenticated context. Refusing to run.`,
+      );
+    }
   }
-  return { ...existing, [scopeField]: tenantId };
+  return { ...existing, ...scope };
+}
+
+function mergeCreateData(
+  model: string,
+  data: unknown,
+  scope: ScopePairs,
+): Record<string, unknown> {
+  const existing = (data ?? {}) as Record<string, unknown>;
+  for (const [field, value] of Object.entries(scope)) {
+    if (field in existing && existing[field] !== value) {
+      throw new Error(
+        `Tenant scoping violation: ${model}.create set ${field}=${String(
+          existing[field],
+        )} which does not match the authenticated context.`,
+      );
+    }
+  }
+  return { ...existing, ...scope };
 }
 
 /**
@@ -77,34 +126,17 @@ export function applyTenantScoping(
     return args;
   }
 
+  const scope = scopePairsFor(config, auth);
   const scopedArgs = { ...args };
 
   if (READ_OR_FILTER_OPERATIONS.has(operation)) {
-    scopedArgs.where = mergeWhereScope(
-      scopedArgs.where,
-      config.scopeField,
-      auth.tenantId,
-    );
+    scopedArgs.where = mergeWhereScope(model, scopedArgs.where, scope);
   } else if (CREATE_OPERATIONS.has(operation)) {
-    const data = (scopedArgs.data ?? {}) as Record<string, unknown>;
-    if (
-      config.scopeField in data &&
-      data[config.scopeField] !== auth.tenantId
-    ) {
-      throw new Error(
-        `Tenant scoping violation: ${model}.create set ${config.scopeField}=${String(
-          data[config.scopeField],
-        )} which does not match the authenticated tenant.`,
-      );
-    }
-    scopedArgs.data = { ...data, [config.scopeField]: auth.tenantId };
+    scopedArgs.data = mergeCreateData(model, scopedArgs.data, scope);
   } else if (CREATE_MANY_OPERATIONS.has(operation)) {
     const items = (
       (scopedArgs.data as Record<string, unknown>[] | undefined) ?? []
-    ).map((item) => ({
-      ...item,
-      [config.scopeField]: auth.tenantId,
-    }));
+    ).map((item) => ({ ...item, ...scope }));
     scopedArgs.data = items;
   }
 
