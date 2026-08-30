@@ -24,6 +24,6 @@ import { StorageService } from './storage/storage.service';
     ExtractionProcessor,
     OcrClientService,
   ],
-  exports: [DocumentsService],
+  exports: [DocumentsService, StorageService],
 })
 export class DocumentsModule {}

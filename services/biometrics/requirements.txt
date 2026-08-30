@@ -1,0 +1,16 @@
+fastapi>=0.115
+uvicorn[standard]>=0.34
+python-multipart>=0.0.20
+dlib>=20.0
+face_recognition>=1.3
+# face_recognition's companion model-data package (ageitgey/face_recognition_models,
+# not on PyPI — installed via its git URL) imports `pkg_resources` unconditionally.
+# Setuptools >=81 has begun dropping pkg_resources; pin below that until upstream
+# either updates or is replaced.
+setuptools<81
+face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models
+numpy>=2.1
+pillow>=11.1
+pdf2image>=1.17
+onnxruntime>=1.20
+pydantic>=2.10

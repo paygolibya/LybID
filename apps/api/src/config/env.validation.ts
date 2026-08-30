@@ -25,6 +25,7 @@ export const envSchema = z.object({
 
   REDIS_URL: z.string().min(1),
   OCR_SERVICE_URL: z.string().min(1),
+  BIOMETRICS_SERVICE_URL: z.string().min(1),
 
   MINIO_ENDPOINT: z.string().min(1),
   MINIO_PORT: z.coerce.number().int().positive().default(9000),

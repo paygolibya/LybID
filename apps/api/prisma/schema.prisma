@@ -39,6 +39,11 @@ enum ApplicantStatus {
 enum DocumentType {
   PASSPORT
   BIRTH_CERTIFICATE
+  // Phase 2: a live selfie photo. Never OCR'd — DocumentsService.upload()
+  // only enqueues extraction for PASSPORT/BIRTH_CERTIFICATE, so a SELFIE
+  // Document stays in UPLOADED status permanently. Processing happens via
+  // a separate BiometricCheck, not this row's own status machine.
+  SELFIE
 }
 
 enum DocumentStatus {
@@ -52,6 +57,25 @@ enum DocumentStatus {
 enum ExtractionStatus {
   COMPLETED
   FAILED
+}
+
+enum BiometricCheckStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+  NEEDS_REVIEW
+}
+
+enum LivenessVerdict {
+  LIVE
+  SPOOF
+  UNKNOWN
+}
+
+enum FaceMatchVerdict {
+  MATCH
+  NO_MATCH
+  UNKNOWN
 }
 
 model Tenant {
@@ -129,7 +153,8 @@ model Applicant {
   updatedAt DateTime        @updatedAt
   deletedAt DateTime?
 
-  documents Document[]
+  documents       Document[]
+  biometricChecks BiometricCheck[]
 
   @@index([tenantId])
   @@map("applicants")
@@ -157,6 +182,13 @@ model Document {
   processedAt DateTime?
 
   extractions DocumentExtraction[]
+
+  // Opposite sides of BiometricCheck's two named relations to this model —
+  // required by Prisma even though Phase 2 has no query path that reads
+  // these arrays (nothing needs "which biometric checks used this
+  // document" from the Document side yet).
+  biometricChecksAsSelfie    BiometricCheck[] @relation("BiometricCheckSelfie")
+  biometricChecksAsReference BiometricCheck[] @relation("BiometricCheckReference")
 
   @@index([tenantId])
   @@index([applicantId])
@@ -189,6 +221,49 @@ model DocumentExtraction {
   @@index([tenantId])
   @@index([documentId])
   @@map("document_extractions")
+}
+
+// Phase 2: one liveness + face-match attempt comparing a selfie against a
+// reference document (normally the applicant's passport). Compute-result
+// record only — no reviewedBy/reviewNotes or other manual-review-workflow
+// fields, that's Phase 4's scope, same posture as DocumentExtraction.
+model BiometricCheck {
+  id          String            @id @default(uuid())
+  tenantId    String
+  applicant   Applicant         @relation(fields: [applicantId], references: [id])
+  applicantId String
+  environment ApiKeyEnvironment
+
+  selfieDocumentId    String
+  selfieDocument      Document @relation("BiometricCheckSelfie", fields: [selfieDocumentId], references: [id])
+  referenceDocumentId String
+  referenceDocument   Document @relation("BiometricCheckReference", fields: [referenceDocumentId], references: [id])
+
+  // The single field decisioning gates on later — mirrors Document.status
+  // exactly (COMPLETED is the "both checks confidently good" terminal
+  // state, like EXTRACTED; NEEDS_REVIEW is the below-threshold catch-all).
+  // livenessVerdict/faceMatchVerdict below are detail, not the gate — this
+  // field is what always reflects the composed pass/fail so nothing
+  // downstream has to recompute that itself.
+  status BiometricCheckStatus @default(PROCESSING)
+
+  livenessScore    Float?
+  livenessVerdict  LivenessVerdict?
+  faceMatchScore   Float?
+  faceMatchVerdict FaceMatchVerdict?
+
+  // e.g. "dlib-resnet-v1+minifasnet-v2" — mirrors DocumentExtraction.engine
+  engine String?
+  // Includes the thresholds used — records which policy produced a given
+  // historical verdict, same audit-trail role as DocumentExtraction.fields.
+  rawResult Json?
+
+  createdAt   DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([tenantId])
+  @@index([applicantId])
+  @@map("biometric_checks")
 }
 
 // Schema-only for Phase 0 — no retention/deletion policy yet (that is a

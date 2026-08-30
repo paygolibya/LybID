@@ -37,6 +37,14 @@ describe('Document upload -> async OCR (e2e, stubbed OCR client)', () => {
   afterAll(async () => {
     await app.close();
     await owner.$disconnect();
+    // The sidecar-down test's job can still have a delayed BullMQ retry
+    // sitting in Redis when this file's tests finish (its 2s/4s exponential
+    // backoff can outlast the test itself) — app.close() stops *this* app's
+    // worker from listening, but doesn't remove the job from Redis. Left
+    // alone, it gets picked up by the *next* spec file's freshly-created
+    // (differently-configured) mock once its delay elapses. Flush it here,
+    // not just at the start of each test, so nothing leaks across files.
+    await resetQueue();
   });
 
   beforeEach(async () => {
@@ -175,6 +183,65 @@ describe('Document upload -> async OCR (e2e, stubbed OCR client)', () => {
       .set('X-API-Key', tenant.token)
       .field('type', 'PASSPORT')
       .attach('file', Buffer.from('not actually an image'), 'passport.png')
+      .expect(400);
+
+    expect(extractMock).not.toHaveBeenCalled();
+  });
+
+  it('uploads a SELFIE without enqueueing an OCR extraction job (stays UPLOADED, no Tesseract call)', async () => {
+    const tenant = await createTenantWithApiKey(
+      app,
+      adminToken,
+      'bank-upload-selfie',
+    );
+    const applicantId = await createApplicant(app, tenant.token, {
+      externalId: 'cust-5',
+    });
+
+    const uploadRes = await request(app.getHttpServer())
+      .post(`/v1/applicants/${applicantId}/documents`)
+      .set('X-API-Key', tenant.token)
+      .field('type', 'SELFIE')
+      .attach('file', TINY_PNG, 'selfie.png')
+      .expect(202);
+
+    expect(uploadRes.body.status).toBe('UPLOADED');
+
+    // No async transition to wait for — a SELFIE never leaves UPLOADED on
+    // its own (see OCR_DOCUMENT_TYPES in documents.service.ts). Give the
+    // queue a moment to have processed anything it might have (it
+    // shouldn't), then assert the extractor was never invoked and the
+    // status is unchanged — the regression this guards against is an
+    // unconditional-enqueue bug silently sending selfies into Tesseract.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const res = await request(app.getHttpServer())
+      .get(`/v1/documents/${uploadRes.body.id}`)
+      .set('X-API-Key', tenant.token)
+      .expect(200);
+    expect(res.body.status).toBe('UPLOADED');
+    expect(extractMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a SELFIE upload that is a PDF (image-only allow-list for this type)', async () => {
+    const tenant = await createTenantWithApiKey(
+      app,
+      adminToken,
+      'bank-upload-selfie-pdf',
+    );
+    const applicantId = await createApplicant(app, tenant.token, {
+      externalId: 'cust-6',
+    });
+
+    // A minimal valid PDF header — real bytes, so magic-byte sniffing
+    // recognizes it as application/pdf, which is not in SELFIE's allow-list.
+    const TINY_PDF = Buffer.from('%PDF-1.4\n%%EOF');
+
+    await request(app.getHttpServer())
+      .post(`/v1/applicants/${applicantId}/documents`)
+      .set('X-API-Key', tenant.token)
+      .field('type', 'SELFIE')
+      .attach('file', TINY_PDF, 'selfie.pdf')
       .expect(400);
 
     expect(extractMock).not.toHaveBeenCalled();

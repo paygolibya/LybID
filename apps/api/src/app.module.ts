@@ -10,6 +10,7 @@ import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { ApplicantsModule } from './modules/applicants/applicants.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
+import { BiometricChecksModule } from './modules/biometric-checks/biometric-checks.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { HealthModule } from './modules/health/health.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
@@ -28,6 +29,7 @@ import { QueueModule } from './queue/queue.module';
     ApiKeysModule,
     ApplicantsModule,
     DocumentsModule,
+    BiometricChecksModule,
     WhoamiModule,
   ],
   providers: [

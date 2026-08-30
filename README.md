@@ -101,6 +101,38 @@ pnpm --filter api test:e2e   # runs with --forceExit — document-upload.e2e-spe
 
 Both were also verified against the **real** OCR sidecar (not stubbed) with the synthetic fixtures: passport extraction — MRZ + ICAO checksums via PassportEye — reached `EXTRACTED` with `overallConfidence: 1.0` and all fields correct. Birth certificate extraction correctly OCR'd the Arabic text (`rawText` was accurate) but the keyword-anchored field heuristic mismatched — it grabbed part of a label as a field's value instead of the adjacent value box. This is the untuned-heuristic risk the Phase 1 plan flagged in advance, now confirmed concretely: the birth-certificate extraction path works end-to-end but its *field-level accuracy* is not yet reliable, and it will need tuning against a real (redacted) sample before being trusted over `NEEDS_REVIEW` — don't take a `status: EXTRACTED` on a birth certificate as a high-confidence result yet, regardless of the confidence score attached.
 
+## Phase 2 — Biometric Liveness + Face Match
+
+An applicant uploads a selfie (via the same document-upload endpoint, `type: SELFIE`); a biometric check compares it against their passport for face match (dlib) and checks it's a live person, not a printed photo or screen replay (MiniFASNet passive anti-spoofing). Same async pattern as Phase 1: `202` immediately, a BullMQ worker calls the biometrics sidecar and writes results, client polls for status.
+
+### Additional prerequisites
+
+- **`services/biometrics`** — Python 3.11+, same WSL2-for-Windows approach as `services/ocr`. Needs more system packages than OCR did: `cmake`, `build-essential`, `libopenblas-dev`, `liblapack-dev` (dlib compiles from source — there's no prebuilt wheel for every platform/Python version, and the compile is genuinely slow, several minutes even with those installed).
+- **dlib's companion model-data package** (`face_recognition_models`, not on PyPI — installed via its git URL) imports `pkg_resources` unconditionally. Recent `setuptools` (80+) has begun dropping `pkg_resources`; `requirements.txt` pins `setuptools<81` for this reason. If you see `Please install face_recognition_models...` despite it actually being installed, this is why — check `python -c "import face_recognition_models"` directly for the real underlying error rather than trusting that message (it's a bare `except Exception` that hides what actually failed).
+- **MiniFASNet-V2 model weights** (anti-spoofing) — not committed to git (see `.gitignore`), fetched from an Apache-2.0-licensed ONNX export at build/setup time: `services/biometrics/Dockerfile` downloads it during the image build; for local (non-Docker) dev, download it once yourself:
+  ```bash
+  mkdir -p services/biometrics/models
+  curl -L -o services/biometrics/models/minifasnet_v2.onnx \
+    https://huggingface.co/garciafido/minifasnet-v2-anti-spoofing-onnx/resolve/main/minifasnet_v2.onnx
+  ```
+
+### Test isolation: `resetQueue()` needs to run in `afterAll`, not just `beforeEach`
+
+A `beforeEach` reset only prevents contamination *within* one spec file's own tests. `document-upload.e2e-spec.ts` and `biometric-check.e2e-spec.ts` share one Redis, and each has a "sidecar errors" test using BullMQ's exponential backoff (2s/4s) — that retry can still be sitting in Redis, delayed but not yet fired, when the spec *file* finishes and Jest moves to the next one. `app.close()` stops that file's own worker from listening, but doesn't remove the job from Redis — left alone, it gets picked up once its delay elapses by the *next* file's freshly-created (differently-configured) mock, producing a real but confusing-looking error for a job that has nothing to do with whatever's currently running. Both files now call `resetQueue()` in `afterAll` too, not just `beforeEach`.
+
+### Setup (in addition to Phase 1's)
+
+```bash
+# same apps/api/.env now also needs BIOMETRICS_SERVICE_URL — see .env.example
+pnpm --filter api prisma:migrate   # applies the new biometric_checks schema + RLS migrations
+```
+
+### Testing
+
+`biometric-check.e2e-spec.ts` stubs both `OcrClientService` and `BiometricsClientService` — setting up test data uploads a PASSPORT document as the reference image, which enqueues a real OCR job just like any other passport upload, so this suite needs the OCR stub too even though it isn't testing OCR. Covers: auto-selecting the applicant's passport as reference vs. an explicit `referenceDocumentId`, the `NEEDS_REVIEW` threshold path (a claimed-LIVE verdict with a low score still gets flagged), `FAILED`+retry on sidecar error, wrong-document-type and missing-passport 400s, and cross-tenant 404s. `document-upload.e2e-spec.ts` gained a SELFIE case asserting the OCR extractor is *never* called for that type (the regression this guards against: an unconditional-enqueue bug would silently send selfies into Tesseract) and a SELFIE-rejects-PDF case for the type-aware MIME allow-list. `services/biometrics` has its own pytest suite (14 tests) — logic-only, mocking `face_recognition`/ONNX-session calls, since a crude synthetic image can't pass a real face detector the way Phase 1's rendered text fixtures passed Tesseract.
+
+Verified against the real (not stubbed) `/verify` endpoint with a dummy non-face image: correctly returns `UNKNOWN` for both liveness and face match with a `no_face_detected` reason, rather than crashing — the pipeline's error handling works end to end. **Not yet verified against a real face photo** — that needs an actual (or explicitly user-supplied, consented) face image, which wasn't sourced or committed as part of building this phase; same posture as Phase 1's birth-certificate accuracy caveat, but for the entire biometrics path rather than just one field-extraction heuristic. Don't treat `COMPLETED` results as validated accuracy until that smoke test has actually run.
+
 ### Roadmap
 
 0. Scaffolding & multi-tenant core (this phase)

@@ -43,7 +43,7 @@ export class DocumentsController {
     @UploadedFile() file: Express.Multer.File,
     @CurrentTenant() tenant: CurrentTenantInfo,
   ): Promise<Document> {
-    const validated = await validateDocumentFile(file.buffer);
+    const validated = await validateDocumentFile(file.buffer, dto.type);
 
     return this.documentsService.upload({
       applicantId,

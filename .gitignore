@@ -21,3 +21,8 @@ __pycache__/
 # any ambiguity about whether a committed image is really synthetic.
 services/ocr/tests/fixtures/*.jpg
 services/ocr/tests/fixtures/*.png
+
+# Pretrained model weights — fetched at Dockerfile build time (see
+# services/biometrics/Dockerfile), same "not vendored into git" posture as
+# Tesseract's language data being installed via apt rather than committed.
+services/biometrics/models/

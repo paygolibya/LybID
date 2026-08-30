@@ -1,14 +1,18 @@
 import { createHash } from 'crypto';
 import { BadRequestException } from '@nestjs/common';
+import type { DocumentType } from '@prisma/client';
 import { fromBuffer as fileTypeFromBuffer } from 'file-type';
 
 export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // 10MB
 
-const ALLOWED_MIME_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'application/pdf',
-]);
+// Type-aware: SELFIE is image-only — nobody uploads a PDF of a live photo,
+// and rasterizing one would just be new attack surface for no real use
+// case. PASSPORT/BIRTH_CERTIFICATE accept scanned PDFs, per Phase 1.
+const ALLOWED_MIME_TYPES_BY_TYPE: Record<DocumentType, Set<string>> = {
+  PASSPORT: new Set(['image/jpeg', 'image/png', 'application/pdf']),
+  BIRTH_CERTIFICATE: new Set(['image/jpeg', 'image/png', 'application/pdf']),
+  SELFIE: new Set(['image/jpeg', 'image/png']),
+};
 
 export interface ValidatedFile {
   mimeType: string;
@@ -19,10 +23,12 @@ export interface ValidatedFile {
  * Validates an uploaded document file against its *actual* content, not the
  * client-supplied Content-Type header (which is trivially spoofable) —
  * sniffs the real file type from magic bytes via `file-type`. Rejects
- * undecodable/mismatched files early, before any OCR time is spent on them.
+ * undecodable/mismatched files early, before any OCR/biometric time is
+ * spent on them.
  */
 export async function validateDocumentFile(
   buffer: Buffer,
+  type: DocumentType,
 ): Promise<ValidatedFile> {
   if (buffer.length === 0) {
     throw new BadRequestException('Uploaded file is empty');
@@ -33,10 +39,11 @@ export async function validateDocumentFile(
     );
   }
 
+  const allowed = ALLOWED_MIME_TYPES_BY_TYPE[type];
   const detected = await fileTypeFromBuffer(buffer);
-  if (!detected || !ALLOWED_MIME_TYPES.has(detected.mime)) {
+  if (!detected || !allowed.has(detected.mime)) {
     throw new BadRequestException(
-      'Uploaded file is not a recognized JPEG, PNG, or PDF (checked by file content, not filename/header)',
+      `Uploaded file is not a recognized type for ${type} (checked by file content, not filename/header) — allowed: ${[...allowed].join(', ')}`,
     );
   }
 

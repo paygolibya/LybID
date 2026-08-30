@@ -13,6 +13,16 @@ import { StorageService } from './storage/storage.service';
 // against a real sample).
 const NEEDS_REVIEW_CONFIDENCE_THRESHOLD = 0.75;
 
+// Explicit allow-list, not "every type except SELFIE" — safer against a
+// future document type (e.g. Phase 3 KYB documents) silently opting into
+// OCR by default. A SELFIE Document stays in UPLOADED status permanently;
+// it's processed later via a BiometricCheck, not this row's own status
+// machine (see the Phase 2 plan).
+const OCR_DOCUMENT_TYPES: ReadonlySet<DocumentType> = new Set([
+  'PASSPORT',
+  'BIRTH_CERTIFICATE',
+]);
+
 export interface UploadDocumentInput {
   applicantId: string;
   type: DocumentType;
@@ -69,12 +79,14 @@ export class DocumentsService {
       data: { storageKey },
     });
 
-    await this.extractionQueue.enqueue({
-      documentId: updated.id,
-      tenantId: updated.tenantId,
-      environment: updated.environment,
-      apiKeyId: input.apiKeyId,
-    });
+    if (OCR_DOCUMENT_TYPES.has(input.type)) {
+      await this.extractionQueue.enqueue({
+        documentId: updated.id,
+        tenantId: updated.tenantId,
+        environment: updated.environment,
+        apiKeyId: input.apiKeyId,
+      });
+    }
 
     return updated;
   }

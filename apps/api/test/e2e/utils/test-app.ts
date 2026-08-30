@@ -6,6 +6,7 @@ import { hash } from 'bcrypt';
 import IORedis from 'ioredis';
 import request from 'supertest';
 import { AppModule } from '../../../src/app.module';
+import { BiometricsClientService } from '../../../src/modules/biometric-checks/biometrics-client/biometrics-client.service';
 import { OcrClientService } from '../../../src/modules/documents/ocr-client/ocr-client.service';
 
 // All e2e spec files share one live Postgres database and each resets it
@@ -36,22 +37,25 @@ export async function createTestApp(): Promise<INestApplication> {
 }
 
 /**
- * Same as createTestApp, but with OcrClientService overridden by a stub —
- * proves the upload -> queue -> worker -> CLS/tenant-transaction plumbing
- * end to end without depending on the real Python OCR sidecar being up.
- * Per the Phase 1 plan: prove the plumbing with a stub before wiring real
- * OCR. Still requires a real Redis and MinIO (both cheap/fast to run
- * locally) — only the OCR HTTP call itself is stubbed.
+ * Same as createTestApp, but with one or more providers overridden by
+ * stubs — proves the upload -> queue -> worker -> CLS/tenant-transaction
+ * plumbing end to end without depending on the real Python sidecars being
+ * up. Per the Phase 1 plan: prove the plumbing with a stub before wiring
+ * real OCR/biometrics. Still requires a real Redis and MinIO (both cheap/
+ * fast to run locally) — only the sidecar HTTP calls themselves are
+ * stubbed.
  */
-export async function createTestAppWithStubOcr(
-  stub: Pick<OcrClientService, 'extract'>,
+export async function createTestAppWithStubs(
+  overrides: Array<{
+    provide: new (...args: never[]) => unknown;
+    useValue: unknown;
+  }>,
 ): Promise<INestApplication> {
-  const moduleRef = await Test.createTestingModule({
-    imports: [AppModule],
-  })
-    .overrideProvider(OcrClientService)
-    .useValue(stub)
-    .compile();
+  let builder = Test.createTestingModule({ imports: [AppModule] });
+  for (const { provide, useValue } of overrides) {
+    builder = builder.overrideProvider(provide).useValue(useValue);
+  }
+  const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication();
   app.useGlobalPipes(
     new ValidationPipe({
@@ -64,6 +68,34 @@ export async function createTestAppWithStubOcr(
   return app;
 }
 
+/** Convenience wrapper for the common single-stub case. */
+export async function createTestAppWithStubOcr(
+  stub: Pick<OcrClientService, 'extract'>,
+): Promise<INestApplication> {
+  return createTestAppWithStubs([
+    { provide: OcrClientService, useValue: stub },
+  ]);
+}
+
+/**
+ * biometric-check.e2e-spec.ts needs both stubbed: setting up test data
+ * uploads a PASSPORT document as the reference image, which enqueues a
+ * *real* OCR job just like any other passport upload (Phase 1's pipeline
+ * doesn't know or care that a test is only interested in the biometric
+ * side) — leaving OcrClientService unstubbed would make this suite depend
+ * on the real Python OCR sidecar being up for no reason relevant to what
+ * it's actually testing.
+ */
+export async function createTestAppWithStubOcrAndBiometrics(
+  ocrStub: Pick<OcrClientService, 'extract'>,
+  biometricsStub: Pick<BiometricsClientService, 'verify'>,
+): Promise<INestApplication> {
+  return createTestAppWithStubs([
+    { provide: OcrClientService, useValue: ocrStub },
+    { provide: BiometricsClientService, useValue: biometricsStub },
+  ]);
+}
+
 /** Connects as the table-owner role, which bypasses RLS — used only for test setup/teardown, never for asserting isolation. */
 export function getOwnerClient(): PrismaClient {
   return new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
@@ -71,7 +103,7 @@ export function getOwnerClient(): PrismaClient {
 
 export async function resetDatabase(owner: PrismaClient): Promise<void> {
   await owner.$executeRawUnsafe(
-    'TRUNCATE TABLE audit_logs, document_extractions, documents, applicants, api_keys, tenants, platform_admin_users RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE audit_logs, biometric_checks, document_extractions, documents, applicants, api_keys, tenants, platform_admin_users RESTART IDENTITY CASCADE',
   );
 }
 
