@@ -5,7 +5,7 @@ import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from PIL import Image
 
-from .face_match import detect_single_face, match_faces
+from .face_match import detect_single_face_any_rotation, match_faces
 from .liveness import check_liveness
 from .pdf import rasterize_first_page
 from .schemas import LivenessResult, VerifyResponse
@@ -13,7 +13,7 @@ from .schemas import LivenessResult, VerifyResponse
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("lybid-biometrics")
 
-ENGINE_NAME = "dlib-resnet-v1+minifasnet-v2"
+ENGINE_NAME = "dlib-resnet-v1+minifasnet-v2+minifasnet-v1se-ensemble"
 
 app = FastAPI(title="LybID biometrics service", description="Self-hosted face match + liveness sidecar — internal use only")
 
@@ -53,14 +53,17 @@ async def verify(
 
     face_match_result = match_faces(reference_array, selfie_array)
 
-    # Liveness only needs the selfie's face — reuse the same detection
-    # shape face_match.py already uses (see detect_single_face's docstring
-    # for why this is a second detection pass rather than a shared one).
-    selfie_bbox, selfie_reason = detect_single_face(selfie_array)
+    # Liveness only needs the selfie's face. This is a second, independent
+    # detection pass rather than reusing match_faces' internal one — simpler
+    # than threading a bbox out of match_faces for a low-volume workload
+    # where a second detection pass is cheap. Rotation-aware for the same
+    # reason match_faces' side is: an unrotated dlib detector can silently
+    # find nothing on a sideways image.
+    rotated_selfie, selfie_bbox, selfie_reason = detect_single_face_any_rotation(selfie_array)
     if selfie_bbox is None:
         liveness_result = LivenessResult(verdict="UNKNOWN", reason=selfie_reason)
     else:
-        liveness_result = check_liveness(selfie_array, selfie_bbox)
+        liveness_result = check_liveness(rotated_selfie, selfie_bbox)
 
     return VerifyResponse(
         faceMatch=face_match_result,
@@ -68,6 +71,11 @@ async def verify(
         engine=ENGINE_NAME,
         rawResult={
             "faceMatchThreshold": 0.6,
-            "livenessThreshold": 0.7,
+            # No liveness threshold: the verdict is argmax of the two-model
+            # ensemble average, matching the official demo's own decision
+            # rule exactly (see liveness.py's module docstring) rather than
+            # an independently-chosen probability cutoff.
+            "faceMatchReason": face_match_result.reason,
+            "livenessReason": liveness_result.reason,
         },
     )

@@ -22,7 +22,11 @@ __pycache__/
 services/ocr/tests/fixtures/*.jpg
 services/ocr/tests/fixtures/*.png
 
-# Pretrained model weights — fetched at Dockerfile build time (see
-# services/biometrics/Dockerfile), same "not vendored into git" posture as
-# Tesseract's language data being installed via apt rather than committed.
-services/biometrics/models/
+# Pretrained model weights — converted at Dockerfile build time (see
+# services/biometrics/Dockerfile and scripts/convert_minifasnet.py), same
+# "not vendored into git" posture as Tesseract's language data being
+# installed via apt rather than committed. Path is app/models/, not
+# models/ — got this wrong once already (see README's Phase 2 section);
+# double-checked against the real on-disk path this time, not just copied
+# from memory.
+services/biometrics/app/models/
