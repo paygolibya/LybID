@@ -238,6 +238,28 @@ No migration — this phase adds no new tables.
 
 Verified end-to-end against the real (non-stubbed) OCR sidecar: minted a real session token via curl with a real API key, used *only* that token (no API key at all) to upload a real passport, watched it reach `EXTRACTED` via real Tesseract through the token-scoped route. Confirmed via `curl -H "Origin: ..."` against a running server that both the CORS headers and the corrected `Cross-Origin-Resource-Policy: cross-origin` header are actually present on real responses, not just believed to be.
 
+## Phase 6 — Client Capture SDK
+
+The embeddable widget a bank drops into its own page to actually collect documents/selfie from an applicant — the client-side counterpart to the applicant-session auth work above. `packages/capture-sdk/` (`@lybid/capture-sdk`), a new pnpm workspace package: React + Tailwind bundled into a single IIFE (`window.LybID`, loadable via a bare `<script>` tag, no bundler required on the integrator's side), rendered inside a Shadow DOM so neither the host page's CSS nor the widget's own Tailwind can leak across that boundary.
+
+Camera-only capture for every step, including the selfie — **no file-upload fallback anywhere in the flow**, a deliberate, explicit product decision: accepting a pre-existing file would defeat the point of both the document-authenticity check and the liveness check the selfie feeds into. Capture is manual tap-to-capture with a static framing guide, not real-time auto-detection (confirmed twice). The SDK never computes or shows a pass/fail decision — decisioning stays a bank-triggered, API-key-only action (Phase 4); this widget's job ends at "submitted."
+
+See [`packages/capture-sdk/README.md`](packages/capture-sdk/README.md) for usage, the build setup, and a real bug worth reading before touching this package's Vite config again: a passing `vite build` + `tsc --noEmit` still shipped a bundle where `window.LybID` was `undefined` in a real browser, because React's own `process.env.NODE_ENV` check threw `ReferenceError: process is not defined` mid-IIFE — caught only by loading the actual compiled output in an actual separate browser page, not by any build-time check.
+
+### Setup (in addition to Phase 5's)
+
+```bash
+pnpm --filter @lybid/capture-sdk build   # -> packages/capture-sdk/dist/capture-sdk.js
+```
+
+No migration, no new backend routes — this phase is pure frontend, consuming the applicant-session routes built above.
+
+### Testing
+
+`pnpm --filter @lybid/capture-sdk test` (Vitest): the step-sequencing state machine (11 tests) and the Welcome → capture-step transition + camera-unsupported fallback (2 tests), including an explicit assertion that no upload button or `<input type="file">` exists anywhere in the DOM.
+
+Verified end-to-end against the real running API from a genuinely separate origin (`demo/index.html` served on `:8080` against the API on `:3000`, real session token, real browser via headless Edge with a fake camera device) — see the package README for the full account, including the `process.env` bug above and an honest note on where headless automation's limits (no interactive driving) stopped the real-camera verification short of the full capture → completion flow.
+
 ### Roadmap
 
 0. Scaffolding & multi-tenant core (this phase)

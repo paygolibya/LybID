@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>LybID Capture SDK — Standalone Demo</title>
+    <style>
+      /* Deliberately clashing host-page CSS, left in on purpose — this is
+         the Shadow DOM isolation check from the plan: if the widget's
+         styling breaks or this leaks in, isolation isn't working. */
+      body {
+        font-family: Georgia, serif;
+        background: #222;
+        color: #eee;
+        margin: 0;
+        padding: 40px;
+      }
+      button {
+        color: red !important;
+        border: 5px solid lime !important;
+      }
+      h1 {
+        text-decoration: underline wavy orange;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Bank's own page (not LybID's)</h1>
+    <p>
+      This page has nothing to do with LybID except the two &lt;script&gt;
+      tags below and one call to <code>LybID.mount()</code> — this is the
+      actual integration surface, nothing more. Session token and API base
+      URL are read from the URL query string (<code>?token=...&amp;api=...</code>)
+      so this file itself never holds a secret.
+    </p>
+    <div id="capture-widget"></div>
+    <p id="result"></p>
+
+    <!-- Script tag #1: the SDK itself. -->
+    <script src="../dist/capture-sdk.js"></script>
+    <!-- Script tag #2: the integration — this is genuinely all a bank needs to write. -->
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const sessionToken = params.get('token');
+      const apiBaseUrl = params.get('api') || 'http://localhost:3000';
+
+      if (!sessionToken) {
+        document.getElementById('result').textContent =
+          'Add ?token=<session token>&api=<api base url> to the URL to run this demo.';
+      } else {
+        window.LybID.mount('#capture-widget', {
+          sessionToken,
+          apiBaseUrl,
+          onComplete: () => {
+            document.getElementById('result').textContent =
+              'onComplete fired — submission finished.';
+          },
+          onError: (err) => {
+            document.getElementById('result').textContent =
+              'onError fired: ' + err.message;
+          },
+        });
+      }
+    </script>
+  </body>
+</html>

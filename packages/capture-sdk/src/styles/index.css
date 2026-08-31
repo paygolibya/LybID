@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tailwind's preflight resets target html/body-level selectors that don't
+   exist inside a Shadow DOM tree (harmlessly inert there) plus generic
+   element selectors (*, h1, p, ...) that DO correctly scope to just this
+   widget's own contents once this stylesheet is injected as a <style>
+   child of the shadow root — see index.ts. No extra scoping needed. */
