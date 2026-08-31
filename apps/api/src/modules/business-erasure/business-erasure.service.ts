@@ -45,6 +45,7 @@ export class BusinessErasureService {
       action: 'business.erase',
       targetType: 'business',
       targetId: business.id,
+      tenantId: business.tenantId,
       metadata: { documentCount: documents.length },
     });
 

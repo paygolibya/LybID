@@ -65,6 +65,9 @@ export class ApplicantErasureService {
       action: 'applicant.erase',
       targetType: 'applicant',
       targetId: applicant.id,
+      // See ApplicantDecisionsService.review()'s identical comment on why
+      // this is explicit, not left to the auth context alone.
+      tenantId: applicant.tenantId,
       metadata: { documentCount: documents.length },
     });
 

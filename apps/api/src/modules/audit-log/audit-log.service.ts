@@ -69,9 +69,22 @@ export class AuditLogService {
    * both a tenant's own API key and the Phase 7 admin dashboard (decision
    * review, erasure) — both flow through the same service method, so the
    * actor genuinely varies per call, not per code path.
+   *
+   * `tenantId` on `entry` is an optional explicit override — the admin
+   * branch has no tenantId of its own to fall back to (an admin JWT isn't
+   * tied to one tenant), so without this, every admin-triggered action
+   * would be invisible when filtering GET /admin/audit-log to one
+   * tenant's trail, even though the action was clearly about that
+   * tenant. Admin-scoped call sites (AdminApplicantDecisionsController's
+   * review, the admin erasure routes) already resolve and ownership-check
+   * the tenant before calling in, so they're expected to pass it
+   * explicitly. Tenant/applicant-mode calls don't need to — their own
+   * auth.tenantId is already correct — but can still override it.
    */
   async recordForCurrentActor(
-    entry: Omit<AuditLogEntry, 'actorType' | 'actorId' | 'tenantId'>,
+    entry: Omit<AuditLogEntry, 'actorType' | 'actorId' | 'tenantId'> & {
+      tenantId?: string;
+    },
   ): Promise<void> {
     const auth = this.requestContext.requireAuth();
     if (auth.mode === 'admin') {
@@ -87,12 +100,12 @@ export class AuditLogService {
     // RequestAuthContext's own comment), so fall back to tenantId.
     return this.record({
       ...entry,
+      tenantId: entry.tenantId ?? auth.tenantId,
       actorType: 'tenant',
       actorId:
         auth.mode === 'tenant'
           ? (auth.apiKeyId ?? auth.tenantId)
           : auth.applicantId,
-      tenantId: auth.tenantId,
     });
   }
 

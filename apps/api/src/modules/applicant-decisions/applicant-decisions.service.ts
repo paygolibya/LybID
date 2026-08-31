@@ -210,6 +210,11 @@ export class ApplicantDecisionsService {
       action: 'applicant.decision.review',
       targetType: 'applicant_decision',
       targetId: decision.id,
+      // Explicit — an admin-mode caller has no tenantId of its own to
+      // fall back to (see recordForCurrentActor's own comment), so
+      // without this an admin-triggered review would be invisible when
+      // filtering the audit log to this tenant's trail.
+      tenantId: applicant.tenantId,
       metadata: { applicantId: applicant.id, status: dto.status },
     });
 

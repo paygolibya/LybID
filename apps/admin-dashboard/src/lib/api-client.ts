@@ -56,6 +56,11 @@ export interface Applicant {
   status: string;
   latestDecisionStatus: DecisionStatus | null;
   createdAt: string;
+  // Phase 8 — set once bank-triggered erasure has purged this
+  // applicant's documents/PII. Deliberately NOT hidden from lists/detail
+  // (unlike a soft-deleted row elsewhere in this system) — see the
+  // backend's Applicant.erasedAt schema comment for why.
+  erasedAt: string | null;
 }
 
 export interface Business {
@@ -65,6 +70,19 @@ export interface Business {
   commercialRegistrationNumber: string | null;
   status: string;
   latestDecisionStatus: DecisionStatus | null;
+  createdAt: string;
+  erasedAt: string | null;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  actorType: 'platform_admin' | 'tenant';
+  actorId: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  tenantId: string | null;
+  metadata: Record<string, unknown> | null;
   createdAt: string;
 }
 
@@ -265,6 +283,37 @@ export class ApiClient {
       `/admin/tenants/${tenantId}/businesses/${id}/decision/review`,
       { method: 'POST', body: JSON.stringify(input) },
     );
+  }
+
+  /**
+   * Bank-triggered erasure (Phase 8), admin-dashboard mirror added
+   * alongside this UI — purges the applicant's document images/OCR PII
+   * and nulls their declared identity fields. Deliberately irreversible;
+   * the confirm step lives in the calling component, not here.
+   */
+  eraseApplicant(tenantId: string, id: string): Promise<Applicant> {
+    return this.request(`/admin/tenants/${tenantId}/applicants/${id}/erase`, {
+      method: 'POST',
+    });
+  }
+
+  eraseBusiness(tenantId: string, id: string): Promise<Business> {
+    return this.request(`/admin/tenants/${tenantId}/businesses/${id}/erase`, {
+      method: 'POST',
+    });
+  }
+
+  listAuditLog(filters: {
+    tenantId?: string;
+    action?: string;
+    targetType?: string;
+    limit?: number;
+  }): Promise<AuditLogEntry[]> {
+    const params = new URLSearchParams(
+      Object.entries(filters).filter(([, v]) => v != null) as [string, string][],
+    );
+    const qs = params.toString();
+    return this.request(`/admin/audit-log${qs ? `?${qs}` : ''}`);
   }
 
   /**

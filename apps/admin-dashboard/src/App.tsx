@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { RequireAuth } from './components/RequireAuth';
 import { AuthProvider } from './lib/auth';
 import { ApplicantDetail } from './pages/ApplicantDetail';
+import { AuditLog } from './pages/AuditLog';
 import { BusinessDetail } from './pages/BusinessDetail';
 import { Login } from './pages/Login';
 import { TenantDetail } from './pages/TenantDetail';
@@ -41,6 +42,14 @@ export function App() {
           element={
             <RequireAuth>
               <BusinessDetail />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/audit-log"
+          element={
+            <RequireAuth>
+              <AuditLog />
             </RequireAuth>
           }
         />

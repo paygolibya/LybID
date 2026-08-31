@@ -180,6 +180,54 @@ describe('Erasure (e2e, stubbed OCR)', () => {
       .expect(404);
   });
 
+  it('admin-triggered erase works, is scoped to the right tenant, and is audited with that tenantId', async () => {
+    const tenantA = await createTenantWithApiKey(
+      app,
+      adminToken,
+      'erase-admin-a',
+    );
+    const tenantB = await createTenantWithApiKey(
+      app,
+      adminToken,
+      'erase-admin-b',
+    );
+    const applicantId = await createApplicant(app, tenantA.token, {
+      externalId: 'erase-admin-1',
+      firstName: 'Karim',
+    });
+
+    // Cross-tenant admin erase still 404s — :tenantId isn't decoration here either.
+    await request(app.getHttpServer())
+      .post(
+        `/admin/tenants/${tenantB.tenantId}/applicants/${applicantId}/erase`,
+      )
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(404);
+
+    const eraseRes = await request(app.getHttpServer())
+      .post(
+        `/admin/tenants/${tenantA.tenantId}/applicants/${applicantId}/erase`,
+      )
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(eraseRes.body.firstName).toBeNull();
+    expect(eraseRes.body.erasedAt).not.toBeNull();
+
+    // The resulting audit entry carries tenantA's id even though the
+    // actor was an admin JWT, not tenantA's own API key — without the
+    // explicit tenantId override in recordForCurrentActor(), this entry
+    // would be invisible when filtering the audit log to this tenant.
+    const auditRes = await request(app.getHttpServer())
+      .get(
+        `/admin/audit-log?tenantId=${tenantA.tenantId}&action=applicant.erase`,
+      )
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(auditRes.body).toHaveLength(1);
+    expect(auditRes.body[0].targetId).toBe(applicantId);
+    expect(auditRes.body[0].actorType).toBe('platform_admin');
+  });
+
   it('purges business documents on erase, mirroring applicant erasure', async () => {
     const tenant = await createTenantWithApiKey(
       app,
@@ -227,5 +275,34 @@ describe('Erasure (e2e, stubbed OCR)', () => {
       .set('X-API-Key', tenant.token)
       .expect(200);
     expect(listRes.body.map((b: { id: string }) => b.id)).toContain(businessId);
+  });
+
+  it("admin-triggered business erase works and 404s for another tenant's business", async () => {
+    const tenantA = await createTenantWithApiKey(
+      app,
+      adminToken,
+      'erase-biz-admin-a',
+    );
+    const tenantB = await createTenantWithApiKey(
+      app,
+      adminToken,
+      'erase-biz-admin-b',
+    );
+    const businessId = await createBusiness(app, tenantA.token, {
+      externalId: 'erase-biz-admin-1',
+      legalName: 'Marsa Freight LLC',
+    });
+
+    await request(app.getHttpServer())
+      .post(`/admin/tenants/${tenantB.tenantId}/businesses/${businessId}/erase`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(404);
+
+    const eraseRes = await request(app.getHttpServer())
+      .post(`/admin/tenants/${tenantA.tenantId}/businesses/${businessId}/erase`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(200);
+    expect(eraseRes.body.legalName).toBeNull();
+    expect(eraseRes.body.erasedAt).not.toBeNull();
   });
 });

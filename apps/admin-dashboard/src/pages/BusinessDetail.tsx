@@ -6,7 +6,7 @@ import { ErrorBanner, Spinner } from '../components/Spinner';
 import { useAuth } from '../lib/auth';
 import type { Decision } from '../lib/api-client';
 import { useAsync } from '../lib/useAsync';
-import { DecisionHistory, DocumentCard, ReviewForm } from './ApplicantDetail';
+import { DecisionHistory, DocumentCard, EraseAction, ReviewForm } from './ApplicantDetail';
 
 export function BusinessDetail() {
   const { tenantId = '', businessId = '' } = useParams<{
@@ -100,6 +100,17 @@ export function BusinessDetail() {
           )}
           <DecisionHistory decisions={business.decisions} />
         </div>
+      </Section>
+
+      <Section title="Danger zone">
+        <EraseAction
+          erasedAt={business.erasedAt}
+          subjectLabel="this business"
+          onErase={async () => {
+            await api.eraseBusiness(tenantId, businessId);
+            detail.reload();
+          }}
+        />
       </Section>
     </div>
   );

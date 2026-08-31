@@ -169,6 +169,8 @@ export class BusinessDecisionsService {
       action: 'business.decision.review',
       targetType: 'business_decision',
       targetId: decision.id,
+      // See ApplicantDecisionsService.review()'s identical comment.
+      tenantId: business.tenantId,
       metadata: { businessId: business.id, status: dto.status },
     });
 

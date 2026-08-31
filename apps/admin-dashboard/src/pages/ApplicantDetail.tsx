@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom';
 import { AuthenticatedImage } from '../components/AuthenticatedImage';
 import { Badge } from '../components/Badge';
 import { Button } from '../components/Button';
+import { Input } from '../components/Input';
+import { Modal } from '../components/Modal';
 import { ErrorBanner, Spinner } from '../components/Spinner';
 import { useAuth } from '../lib/auth';
 import type { AdminDocument, Decision } from '../lib/api-client';
@@ -129,6 +131,17 @@ export function ApplicantDetail() {
           <DecisionHistory decisions={applicant.decisions} />
         </div>
       </Section>
+
+      <Section title="Danger zone">
+        <EraseAction
+          erasedAt={applicant.erasedAt}
+          subjectLabel="this applicant"
+          onErase={async () => {
+            await api.eraseApplicant(tenantId, applicantId);
+            detail.reload();
+          }}
+        />
+      </Section>
     </div>
   );
 }
@@ -216,6 +229,94 @@ export function ReviewForm({
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Bank-triggered erasure (Phase 8), added to the dashboard alongside its
+ * own admin route. Deliberately irreversible and gated behind typing the
+ * word ERASE, not just a click-through confirm — this permanently deletes
+ * document images from MinIO and nulls OCR-extracted PII, unlike every
+ * other action on this page. Once erased, the record stays visible (see
+ * the backend's Applicant.erasedAt comment) but this section just shows
+ * that fact instead of the button again — there's nothing further to
+ * confirm.
+ */
+export function EraseAction({
+  erasedAt,
+  subjectLabel,
+  onErase,
+}: {
+  erasedAt: string | null;
+  subjectLabel: string;
+  onErase: () => Promise<void>;
+}) {
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (erasedAt) {
+    return (
+      <p className="text-sm text-slate-500">
+        Erased on {new Date(erasedAt).toLocaleString()} — document images and
+        extracted PII have been permanently deleted. Decision history is
+        unaffected.
+      </p>
+    );
+  }
+
+  async function confirmErase() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onErase();
+      setShowConfirm(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to erase');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <Button variant="danger" onClick={() => setShowConfirm(true)}>
+        Erase applicant data
+      </Button>
+      {showConfirm && (
+        <Modal title="Erase applicant data" onClose={() => setShowConfirm(false)}>
+          <div className="flex flex-col gap-3">
+            {error && <ErrorBanner message={error} />}
+            <p className="text-sm text-slate-600">
+              This permanently deletes {subjectLabel}&apos;s document images and
+              OCR-extracted PII, and clears their declared identity fields.
+              Decision history is kept. <strong>This cannot be undone.</strong>
+            </p>
+            <label className="text-xs font-medium text-slate-600" htmlFor="confirm-erase">
+              Type ERASE to confirm
+            </label>
+            <Input
+              id="confirm-erase"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+            />
+            <div className="mt-2 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setShowConfirm(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                disabled={confirmText !== 'ERASE' || busy}
+                onClick={confirmErase}
+              >
+                {busy ? 'Erasing…' : 'Erase permanently'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }
 
