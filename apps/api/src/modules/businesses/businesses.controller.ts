@@ -1,9 +1,18 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import type { Business } from '@prisma/client';
 import { ApiKeyGuard } from '../../common/guards/api-key.guard';
 import { BusinessesService } from './businesses.service';
 import { CreateBusinessDto } from './dto/create-business.dto';
+import { ListBusinessesDto } from './dto/list-businesses.dto';
 
 @ApiTags('businesses')
 @ApiSecurity('apiKey')
@@ -18,8 +27,8 @@ export class BusinessesController {
   }
 
   @Get()
-  list(): Promise<Business[]> {
-    return this.businessesService.list();
+  list(@Query() query: ListBusinessesDto): Promise<Business[]> {
+    return this.businessesService.list(query.decisionStatus);
   }
 
   @Get(':id')

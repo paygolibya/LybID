@@ -38,6 +38,14 @@ export const TENANT_SCOPED_MODELS: Record<
     scopeField: 'tenantId',
     environmentField: 'environment',
   },
+  ApplicantDecision: {
+    scopeField: 'tenantId',
+    environmentField: 'environment',
+  },
+  BusinessDecision: {
+    scopeField: 'tenantId',
+    environmentField: 'environment',
+  },
 };
 
 const READ_OR_FILTER_OPERATIONS = new Set([

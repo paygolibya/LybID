@@ -1,9 +1,18 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiSecurity, ApiTags } from '@nestjs/swagger';
 import type { Applicant } from '@prisma/client';
 import { ApiKeyGuard } from '../../common/guards/api-key.guard';
 import { ApplicantsService } from './applicants.service';
 import { CreateApplicantDto } from './dto/create-applicant.dto';
+import { ListApplicantsDto } from './dto/list-applicants.dto';
 
 @ApiTags('applicants')
 @ApiSecurity('apiKey')
@@ -18,8 +27,8 @@ export class ApplicantsController {
   }
 
   @Get()
-  list(): Promise<Applicant[]> {
-    return this.applicantsService.list();
+  list(@Query() query: ListApplicantsDto): Promise<Applicant[]> {
+    return this.applicantsService.list(query.decisionStatus);
   }
 
   @Get(':id')

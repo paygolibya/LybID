@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { Applicant, Prisma } from '@prisma/client';
+import type { Applicant, DecisionStatus, Prisma } from '@prisma/client';
 import { RequestContextService } from '../../database/tenant-context';
 import type { CreateApplicantDto } from './dto/create-applicant.dto';
 
@@ -24,10 +24,18 @@ export class ApplicantsService {
     });
   }
 
-  async list(): Promise<Applicant[]> {
+  /**
+   * `decisionStatus` filters against the denormalized
+   * Applicant.latestDecisionStatus column (Phase 4) — this *is* the manual
+   * review queue (?decisionStatus=NEEDS_REVIEW), not a separate resource.
+   */
+  async list(decisionStatus?: DecisionStatus): Promise<Applicant[]> {
     const tx = this.requestContext.requireTx();
     return tx.applicant.findMany({
-      where: { deletedAt: null },
+      where: {
+        deletedAt: null,
+        ...(decisionStatus ? { latestDecisionStatus: decisionStatus } : {}),
+      },
       orderBy: { createdAt: 'desc' },
     });
   }

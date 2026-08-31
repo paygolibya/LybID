@@ -89,6 +89,12 @@ enum BusinessDocumentType {
   TAX_ID
 }
 
+enum DecisionStatus {
+  APPROVED
+  REJECTED
+  NEEDS_REVIEW
+}
+
 model Tenant {
   id        String       @id @default(uuid())
   name      String
@@ -165,8 +171,17 @@ model Applicant {
   updatedAt DateTime        @updatedAt
   deletedAt DateTime?
 
+  // Phase 4: denormalized latest decision status, updated in the same
+  // transaction as each new ApplicantDecision row — same "current state on
+  // the parent, full history in a child table" shape as Document.status +
+  // DocumentExtraction. Exists so the review queue (?decisionStatus=
+  // NEEDS_REVIEW on GET /v1/applicants) is a cheap indexed filter instead
+  // of a latest-row-per-group query. Null until a first decision exists.
+  latestDecisionStatus DecisionStatus?
+
   documents       Document[]
   biometricChecks BiometricCheck[]
+  decisions       ApplicantDecision[]
 
   @@index([tenantId])
   @@map("applicants")
@@ -298,7 +313,12 @@ model Business {
   updatedAt DateTime       @updatedAt
   deletedAt DateTime?
 
+  // Phase 4: mirrors Applicant.latestDecisionStatus exactly — see its
+  // comment for the full explanation.
+  latestDecisionStatus DecisionStatus?
+
   documents BusinessDocument[]
+  decisions BusinessDecision[]
 
   @@index([tenantId])
   @@map("businesses")
@@ -360,6 +380,62 @@ model BusinessDocumentExtraction {
   @@index([tenantId])
   @@index([documentId])
   @@map("business_document_extractions")
+}
+
+// Phase 4: one decisioning attempt for an Applicant — append-only history,
+// same shape as DocumentExtraction relative to Document ("current" is just
+// the most recent row by createdAt, mirrored onto Applicant.latestDecisionStatus
+// for cheap filtering). Produced either by an automatic decide() call or by
+// a human's manual review action (reviewerId/reviewNotes set only for the
+// latter) — see the Phase 4 plan for why REJECTED is reachable only via
+// manual review, never the automatic rule.
+model ApplicantDecision {
+  id          String            @id @default(uuid())
+  tenantId    String
+  applicantId String
+  applicant   Applicant         @relation(fields: [applicantId], references: [id])
+  environment ApiKeyEnvironment
+
+  status DecisionStatus
+
+  // Audit trail of what fed the decision (which checks, their statuses) —
+  // same audit-trail role as DocumentExtraction.fields / BiometricCheck.rawResult.
+  reasoning Json
+
+  // Set only when this row resulted from a manual review action. No
+  // bank-staff identity system exists yet (see the Phase 4 plan) —
+  // reviewerId is free text the tenant's own caller supplies, same posture
+  // as ApiKey.createdByAdminId elsewhere but without an FK.
+  reviewerId  String?
+  reviewNotes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([applicantId])
+  @@map("applicant_decisions")
+}
+
+// Mirrors ApplicantDecision exactly, for Business.
+model BusinessDecision {
+  id          String            @id @default(uuid())
+  tenantId    String
+  businessId  String
+  business    Business          @relation(fields: [businessId], references: [id])
+  environment ApiKeyEnvironment
+
+  status DecisionStatus
+
+  reasoning Json
+
+  reviewerId  String?
+  reviewNotes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([businessId])
+  @@map("business_decisions")
 }
 
 // Schema-only for Phase 0 — no retention/deletion policy yet (that is a

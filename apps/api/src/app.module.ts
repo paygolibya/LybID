@@ -8,9 +8,11 @@ import { validateEnv } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
 import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
+import { ApplicantDecisionsModule } from './modules/applicant-decisions/applicant-decisions.module';
 import { ApplicantsModule } from './modules/applicants/applicants.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { BiometricChecksModule } from './modules/biometric-checks/biometric-checks.module';
+import { BusinessDecisionsModule } from './modules/business-decisions/business-decisions.module';
 import { BusinessDocumentsModule } from './modules/business-documents/business-documents.module';
 import { BusinessesModule } from './modules/businesses/businesses.module';
 import { DocumentsModule } from './modules/documents/documents.module';
@@ -34,6 +36,8 @@ import { QueueModule } from './queue/queue.module';
     BiometricChecksModule,
     BusinessesModule,
     BusinessDocumentsModule,
+    ApplicantDecisionsModule,
+    BusinessDecisionsModule,
     WhoamiModule,
   ],
   providers: [

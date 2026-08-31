@@ -164,6 +164,30 @@ pnpm --filter api prisma:migrate   # applies the new businesses/business_documen
 
 **Same honest caveat as Phase 1's birth-certificate extraction**: the label keywords for all three new document types are best-guess Arabic terminology, **unverified against a real document** (no real KYB sample was available while building this). The pipeline runs correctly end-to-end (upload → OCR → structured response), but field-level accuracy needs tuning against a real (redacted) sample before Phase 4 (decisioning) could rely on it — don't treat a `status: EXTRACTED` on a KYB document as a high-confidence result yet, same as the birth-certificate caveat.
 
+## Phase 4 — Workflow / Decisioning + Manual Review Queue
+
+Every verification primitive so far (`Document`, `BiometricCheck`, `BusinessDocument`) produces its own independent result — Phase 4 rolls those up into a single `APPROVED` / `REJECTED` / `NEEDS_REVIEW` **decision** a bank can actually act on, plus a way for a human to resolve a `NEEDS_REVIEW` case. Covers both Applicant (KYC) and Business (KYB) decisioning, same pattern for each. Unlike every other phase, this one is **synchronous, not async** — deciding is pure computation over rows that already exist in Postgres, no external sidecar call, so there's no BullMQ queue/worker here at all: `POST /v1/applicants/:id/decision` (and the Business equivalent) return `201` immediately with the fresh decision.
+
+**Trigger is explicit, not automatic**: a decision is only computed when the bank calls `POST .../decision` — nothing watches `Document`/`BiometricCheck` completions and decides on its own. Simpler and more predictable; revisit if a real automation need shows up.
+
+**The rule, and why `REJECTED` is never automatic**: an Applicant decision requires a `PASSPORT` Document, a `BIRTH_CERTIFICATE` Document, and a `BiometricCheck` to all exist and have reached a terminal state (`400` otherwise). `APPROVED` iff all three are in their own confidently-good terminal state (both Documents `EXTRACTED`, `BiometricCheck` `COMPLETED`); `NEEDS_REVIEW` otherwise. Business decisions mirror this against the three Phase 3 KYB document types. **`REJECTED` is reachable only via manual review, for both** — deliberately, not an oversight: `BiometricCheck.status === 'COMPLETED'` already means both liveness *and* face-match passed threshold, and there's no distinct "confidently rejected" signal anywhere in the system separate from `NEEDS_REVIEW` (a clear mismatch and a borderline one land in the same bucket). Inventing an auto-reject rule the underlying data doesn't support would be the same kind of unearned confidence the Phase 2 liveness caveat already warns against.
+
+**No bank-staff reviewer identity exists**: only a tenant's long-lived `X-API-Key` or Marsa's own admin JWT exist system-wide — there's no third "bank staff member" auth mode. The review endpoint (`POST .../decision/review`) is authenticated the same way every other tenant-facing write already is (the tenant's own API key), with the reviewer's identity supplied as a free-text `reviewerId` field the caller provides — same posture as `ApiKey.createdByAdminId` elsewhere but without an FK, since there's no matching user table. A bank's own backend/reviewer tooling calls this on the human's behalf; an actual reviewer UI is Phase 7's job. Review is restricted to resolving a currently-`NEEDS_REVIEW` decision (`400` otherwise) — overriding an already-`APPROVED`/`REJECTED` decision is a real future need, deliberately deferred.
+
+**The review queue is a query filter, not a new resource**: `GET /v1/applicants?decisionStatus=NEEDS_REVIEW` (and the Business equivalent) *is* the manual review queue — backed by a denormalized `latestDecisionStatus` column on `Applicant`/`Business`, updated in the same transaction as each new decision row, same "current state on the parent, full history in a child table" shape `Document.status` + `DocumentExtraction` already use. Decisions themselves are append-only history (`ApplicantDecision`/`BusinessDecision`) — both an automatic `decide()` call and a manual `review()` action just create a new row; "current" is always the most recent by `createdAt`.
+
+### Setup (in addition to Phase 3's)
+
+```bash
+pnpm --filter api prisma:migrate   # applies the new decision schema + RLS migrations
+```
+
+### Testing
+
+`decisioning.e2e-spec.ts` covers both Applicant and Business decisioning: the `APPROVED` path, `NEEDS_REVIEW` (never auto-`REJECTED`), `400`s for missing/still-in-progress required checks, manual review resolving `NEEDS_REVIEW` → `REJECTED` then correctly blocking a second review once the latest decision is no longer `NEEDS_REVIEW`, the review-queue filter, and cross-tenant `404`s. No new sidecar involved, so no new pytest suite this phase.
+
+Verified end-to-end against the real (non-stubbed) OCR and biometrics sidecars: uploaded a real passport + birth certificate (both reached `EXTRACTED` via real Tesseract) and a non-face selfie (correctly `UNKNOWN`/`NEEDS_REVIEW` via the real dlib/MiniFASNet pipeline, same honest behavior Phase 2 already established for a non-face image) — `POST .../decision` correctly returned `NEEDS_REVIEW` with the full reasoning trail, the manual review endpoint correctly overrode it to `APPROVED`, and a second review attempt was correctly rejected with `400` since the latest decision was no longer `NEEDS_REVIEW`.
+
 ### Roadmap
 
 0. Scaffolding & multi-tenant core (this phase)
