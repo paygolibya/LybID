@@ -1,0 +1,216 @@
+# CI for the whole monorepo. Split into independent jobs so a failure or
+# slowdown in one (services/biometrics' from-source dlib compile is
+# genuinely slow — several minutes, see its own README section) doesn't
+# block the fast ones.
+#
+# NOTE — stated honestly, same as this repo's Phase 9 Docker work: this
+# workflow *as a GitHub Actions run* has never actually executed. This
+# repository has no configured git remote (confirmed via `git remote -v`
+# — nothing to push to), so there's been no way to trigger a real run and
+# observe it. The underlying commands are a different story — every
+# `pnpm --filter ... test/lint/build` and `pnpm test:e2e` here has
+# actually been run locally and passed throughout this project (see the
+# root README's per-phase Testing sections), and the two Python jobs'
+# exact commands (`python -m tests.generate_fixtures`, `pytest`) were
+# re-run for real via WSL2 while writing this file — services/ocr: 6
+# passed, services/biometrics: 20 passed. What's NOT verified is the
+# GitHub-Actions-specific wiring around them (the `services:` blocks, the
+# MinIO docker-run workaround, ubuntu-latest's apt package availability,
+# actions/setup-node's pnpm cache) — standard, well-documented patterns,
+# but the first real run is whoever pushes this to an actual GitHub repo.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  PNPM_VERSION: "9.15.0" # matches package.json's own "packageManager" pin
+
+jobs:
+  api-unit:
+    name: api / lint + unit test + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter api lint
+      - run: pnpm --filter api exec prisma generate
+      - run: pnpm --filter api test
+      - run: pnpm --filter api build
+
+  api-e2e:
+    name: api / e2e (real Postgres + Redis + MinIO, stubbed OCR/biometrics)
+    runs-on: ubuntu-latest
+    # Every e2e spec in this suite stubs OcrClientService/BiometricsClientService
+    # at the Nest testing-module level (see test/e2e/utils/test-app.ts) — the
+    # real Python sidecars are never needed to run this job, only Postgres,
+    # Redis, and MinIO.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lybid_owner
+          POSTGRES_PASSWORD: lybid_owner_dev_password
+          POSTGRES_DB: lybid
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U lybid_owner -d lybid"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://lybid_owner:lybid_owner_dev_password@localhost:5432/lybid?schema=public
+      RUNTIME_DATABASE_URL: postgresql://lybid_app:lybid_app_dev_password@localhost:5432/lybid?schema=public
+      RUNTIME_DB_PASSWORD: lybid_app_dev_password
+      NODE_ENV: test
+      PORT: 3000
+      JWT_SECRET: ci-only-jwt-secret-not-a-real-deployment
+      JWT_EXPIRES_IN: 8h
+      API_KEY_PEPPER: ci-only-api-key-pepper-not-a-real-deployment
+      APPLICANT_TOKEN_SECRET: ci-only-applicant-token-secret-not-a-real-deployment
+      APPLICANT_TOKEN_EXPIRES_IN: 30m
+      ADMIN_BOOTSTRAP_EMAIL: ci-admin@example.com
+      ADMIN_BOOTSTRAP_PASSWORD: ci-only-not-a-real-deployment
+      REDIS_URL: redis://localhost:6379
+      OCR_SERVICE_URL: http://localhost:8000 # never actually called — stubbed, see above
+      BIOMETRICS_SERVICE_URL: http://localhost:8001 # never actually called — stubbed
+      MINIO_ENDPOINT: localhost
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: lybid_minio
+      MINIO_SECRET_KEY: lybid_minio_dev_password
+      MINIO_BUCKET: lybid-documents
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter api exec prisma generate
+
+      # MinIO's official image needs `server /data` as its command to
+      # actually start — GitHub Actions' `services:` block can't override
+      # a service container's command, only pull-and-run it as-is (a
+      # well-known limitation, not something to work around inside
+      # `services:`). Started directly instead.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 -p 9001:9001 \
+            -e MINIO_ROOT_USER=lybid_minio -e MINIO_ROOT_PASSWORD=lybid_minio_dev_password \
+            minio/minio server /data --console-address ":9001"
+          timeout 30 bash -c 'until curl -sf http://localhost:9000/minio/health/ready; do sleep 1; done'
+
+      - name: Apply migrations
+        run: pnpm --filter api exec prisma migrate deploy
+
+      - run: pnpm --filter api test:e2e
+
+  capture-sdk:
+    name: capture-sdk / lint + test + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @lybid/capture-sdk lint
+      - run: pnpm --filter @lybid/capture-sdk test
+      - run: pnpm --filter @lybid/capture-sdk build
+
+  admin-dashboard:
+    name: admin-dashboard / lint + test + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @lybid/admin-dashboard lint
+      - run: pnpm --filter @lybid/admin-dashboard test
+      - run: pnpm --filter @lybid/admin-dashboard build
+
+  ocr-sidecar:
+    name: services/ocr / pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/ocr
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: services/ocr/requirements.txt
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-ara tesseract-ocr-eng poppler-utils libgl1
+      - run: pip install -r requirements.txt pytest
+      # generate_fixtures.py uses package-relative imports (`from
+      # .mrz_checksum import ...`) — must run as a module (`-m`), not as a
+      # standalone script, or Python has no package context to resolve
+      # those imports from. No conftest.py exists to do this automatically
+      # despite what the script's own docstring speculates, confirmed by
+      # checking — this step is required, not optional.
+      - run: python -m tests.generate_fixtures
+      - run: pytest
+
+  biometrics-sidecar:
+    name: services/biometrics / pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/biometrics
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: services/biometrics/requirements.txt
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake libopenblas-dev liblapack-dev poppler-utils libgl1
+      # dlib has no prebuilt wheel for every platform/Python combination —
+      # this step compiles it from source and is genuinely slow (several
+      # minutes), same as local dev — see this service's own README
+      # section. pip's cache above only helps once a wheel has been built
+      # and cached by pip itself across runs; the very first run pays the
+      # full cost regardless.
+      - run: pip install -r requirements.txt pytest
+      # The pytest suite is logic-only (mocks face_recognition/ONNX-session
+      # calls, per the root README's Phase 2 Testing section) — it does not
+      # need the real MiniFASNet ONNX models converted, so the slow
+      # torch-based conversion step (convert_minifasnet.py, only otherwise
+      # run at Docker build time) is deliberately skipped here.
+      - run: pytest
