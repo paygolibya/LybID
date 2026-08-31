@@ -92,6 +92,13 @@ export class BusinessDecisionsService {
     const decision = await tx.businessDecision.create({
       data: {
         businessId: business.id,
+        // Explicit, not left to the extension's auto-injection — see
+        // ApplicantDecisionsService.decide()'s identical comment (this
+        // service is now called from both the tenant route and the Phase 7
+        // admin dashboard route, and admin-mode requests bypass that
+        // injection entirely).
+        tenantId: business.tenantId,
+        environment: business.environment,
         status,
         reasoning: reasoning as unknown as Prisma.InputJsonValue,
       } as Prisma.BusinessDecisionUncheckedCreateInput,
@@ -138,6 +145,8 @@ export class BusinessDecisionsService {
     const decision = await tx.businessDecision.create({
       data: {
         businessId: business.id,
+        tenantId: business.tenantId,
+        environment: business.environment,
         status: dto.status,
         reasoning: {
           manualReview: true,

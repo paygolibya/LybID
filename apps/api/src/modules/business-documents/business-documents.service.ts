@@ -110,6 +110,23 @@ export class BusinessDocumentsService {
     return { ...document, latestExtraction };
   }
 
+  /** Mirrors DocumentsService.getForTenantOrThrow() exactly, for BusinessDocument. */
+  async getForTenantOrThrow(
+    tenantId: string,
+    id: string,
+  ): Promise<BusinessDocument> {
+    const tx = this.requestContext.requireTx();
+    const document = await tx.businessDocument.findFirst({
+      where: { id, tenantId },
+    });
+    if (!document) {
+      throw new NotFoundException(
+        `Business document ${id} not found for tenant ${tenantId}`,
+      );
+    }
+    return document;
+  }
+
   /**
    * Flips UPLOADED -> PROCESSING and returns the document, in its own short
    * transaction — mirrors documents.service.ts's markProcessing exactly,

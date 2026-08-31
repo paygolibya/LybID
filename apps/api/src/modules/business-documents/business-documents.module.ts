@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { BusinessesModule } from '../businesses/businesses.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { UsageModule } from '../usage/usage.module';
+import { AdminBusinessDocumentsController } from './admin-business-documents.controller';
 import { BusinessDocumentsController } from './business-documents.controller';
 import { BusinessDocumentsService } from './business-documents.service';
 import {
@@ -24,7 +25,7 @@ import { BusinessDocumentExtractionProcessor } from './queue/business-document-e
     UsageModule,
     BullModule.registerQueue({ name: BUSINESS_DOCUMENT_EXTRACTION_QUEUE_NAME }),
   ],
-  controllers: [BusinessDocumentsController],
+  controllers: [BusinessDocumentsController, AdminBusinessDocumentsController],
   providers: [
     BusinessDocumentsService,
     BusinessDocumentExtractionQueue,

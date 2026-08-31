@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ApplicantsModule } from '../applicants/applicants.module';
 import { UsageModule } from '../usage/usage.module';
+import { AdminDocumentsController } from './admin-documents.controller';
 import { DocumentsController } from './documents.controller';
 import { DocumentsService } from './documents.service';
 import { OcrClientService } from './ocr-client/ocr-client.service';
@@ -18,7 +19,7 @@ import { StorageService } from './storage/storage.service';
     UsageModule,
     BullModule.registerQueue({ name: EXTRACTION_QUEUE_NAME }),
   ],
-  controllers: [DocumentsController],
+  controllers: [DocumentsController, AdminDocumentsController],
   providers: [
     DocumentsService,
     StorageService,

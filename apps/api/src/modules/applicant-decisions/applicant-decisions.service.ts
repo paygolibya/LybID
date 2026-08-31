@@ -117,6 +117,17 @@ export class ApplicantDecisionsService {
     const decision = await tx.applicantDecision.create({
       data: {
         applicantId: applicant.id,
+        // Explicit, not left to the tenant-scoping extension's
+        // auto-injection (Phase 7 finding): admin-mode requests bypass
+        // that injection entirely (see prisma-tenant.extension.ts —
+        // `if (auth.mode === 'admin') return args`), and this service is
+        // now called from both the tenant-facing route and the Phase 7
+        // admin dashboard route. Sourcing these from the already-fetched
+        // `applicant` row (not the auth context) makes this correct under
+        // every auth mode without this service needing to know which one
+        // is calling it.
+        tenantId: applicant.tenantId,
+        environment: applicant.environment,
         status,
         reasoning: reasoning as unknown as Prisma.InputJsonValue,
       } as Prisma.ApplicantDecisionUncheckedCreateInput,
@@ -168,6 +179,10 @@ export class ApplicantDecisionsService {
     const decision = await tx.applicantDecision.create({
       data: {
         applicantId: applicant.id,
+        // See decide()'s identical comment — explicit, not left to the
+        // extension's auto-injection, which admin-mode requests bypass.
+        tenantId: applicant.tenantId,
+        environment: applicant.environment,
         status: dto.status,
         reasoning: {
           manualReview: true,

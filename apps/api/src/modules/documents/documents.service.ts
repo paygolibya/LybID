@@ -111,6 +111,26 @@ export class DocumentsService {
   }
 
   /**
+   * Phase 7 (admin dashboard) — explicit-tenantId variant, same rationale
+   * as ApplicantsService's own section of these: under admin auth nothing
+   * auto-injects a tenantId filter, so this is the ownership check the
+   * admin document-image endpoint must call before streaming any bytes —
+   * without it, `:tenantId` in that route would be pure decoration.
+   */
+  async getForTenantOrThrow(tenantId: string, id: string): Promise<Document> {
+    const tx = this.requestContext.requireTx();
+    const document = await tx.document.findFirst({
+      where: { id, tenantId },
+    });
+    if (!document) {
+      throw new NotFoundException(
+        `Document ${id} not found for tenant ${tenantId}`,
+      );
+    }
+    return document;
+  }
+
+  /**
    * Flips UPLOADED -> PROCESSING and returns the document, in its own short
    * transaction. The worker calls this, then does the slow OCR call
    * *outside* any transaction, then calls recordExtractionResult /

@@ -260,6 +260,36 @@ No migration, no new backend routes — this phase is pure frontend, consuming t
 
 Verified end-to-end against the real running API from a genuinely separate origin (`demo/index.html` served on `:8080` against the API on `:3000`, real session token, real browser via headless Edge with a fake camera device) — see the package README for the full account, including the `process.env` bug above and an honest note on where headless automation's limits (no interactive driving) stopped the real-camera verification short of the full capture → completion flow.
 
+## Phase 7 — Bank-Facing Admin Dashboard
+
+A UI for Marsa's own ops staff — not a bank self-service portal. `apps/admin-dashboard/` (`@lybid/admin-dashboard`), a normal Vite + React + Tailwind SPA (not IIFE/library mode like `capture-sdk` — a real app build, served as its own site), authenticated with the existing admin JWT (`POST /admin/auth/login`), the same credential every `/admin/*` route has always required. Banks still have no login of their own — that would need a new `TenantUser` auth system, deliberately out of scope: this phase gives Marsa's ops staff a UI over what already existed only as `curl` commands, not a self-service portal for bank staff.
+
+**The real backend gap this phase actually needed to fix**: every existing read for applicants/businesses/decisions relies on the tenant-scoping Prisma extension auto-injecting `tenantId` from the caller's API key — that auto-injection never happens under admin auth (admin mode intentionally bypasses it and relies on Postgres RLS's `*_admin_all` policies, which permit reading *any* tenant's rows). So there was no way for an admin JWT to browse one specific tenant's data at all before this phase — `admin-jwt.guard.ts`'s own comment had flagged this in advance ("no bank-facing dashboard yet, that's Phase 7"). Fixed with a batch of new, explicitly-tenant-filtered admin routes (`GET/POST /admin/tenants/:tenantId/applicants[/:id[/decision[/review]]]`, mirrored for `businesses`) — every one of them checks the fetched row's `tenantId` against the route param and 404s on mismatch before doing anything else, the same "don't confirm existence" idiom the applicant-session work established in Phase 6. Applicant/business detail is a single aggregate read (`ApplicantsService.getDetailForTenant`/`BusinessesService.getDetailForTenant`) built via Prisma relation `include`s rather than composing several service calls — one round trip for the whole detail page.
+
+**A second, genuinely new capability**: no document had ever been served back out of this system before — MinIO was purely internal, written by upload and read only by the OCR/biometrics sidecars. The manual review queue is close to useless without a human actually seeing the flagged passport/selfie image, so this phase adds `GET /admin/tenants/:tenantId/documents/:id/image` (and the `business-documents` equivalent): a **backend-proxied stream**, not a presigned MinIO URL handed to the browser — the raw MinIO URL/credentials never reach the browser, and every view goes through the same `AdminJwtGuard` check as any other admin action, with nothing resembling a bearer URL that could leak via browser history/logs/a shared screen. The dashboard fetches it as an authenticated `Blob` and renders it via `URL.createObjectURL` (see `AuthenticatedImage.tsx`) — a plain `<img src>` can't carry the `Authorization` header this needs.
+
+**A real bug this surfaced, caught by the new e2e suite, not guessed**: `ApplicantDecisionsService.decide()`/`.review()` (and the `BusinessDecisionsService` equivalents) create their decision rows relying on that same tenant-scoping extension to auto-inject `tenantId`/`environment` — which, like the reads above, silently does nothing under admin auth. Calling the admin-triggered decide/review routes threw a real `PrismaClientValidationError: Argument tenantId is missing` the first time they actually ran against Postgres, not something `tsc`/`vite build` could have caught. Fixed by sourcing `tenantId`/`environment` explicitly from the already-fetched `applicant`/`business` row in both services, which is correct under every auth mode (tenant, applicant-session, and admin) rather than relying on which auth mode happens to be calling.
+
+**Reviewer identity is real, not free text, for admin-triggered reviews**: `AdminJwtGuard`'s auth context was widened from `{mode:'admin', adminId}` to also carry `email` (already decoded from the JWT payload, just not forwarded before), and the new `POST .../decision/review` admin route sources `reviewerId` from the authenticated admin's own email rather than accepting it from the request body — `AdminReviewApplicantDecisionDto`/`AdminReviewBusinessDecisionDto` don't even have a `reviewerId` field for a caller to set.
+
+**Explicitly deferred, not an oversight**: an audit-log read endpoint. `AuditLogService`'s own comment already said this was "write-only for Phase 0 — no read endpoint or retention policy yet (both are Phase 8 decisions)" — a call made before this project even had a phase list this granular, and Phase 8 (next) is exactly where it belongs. This dashboard has no audit-trail view.
+
+See [`apps/admin-dashboard/README.md`](apps/admin-dashboard/README.md) for the dashboard's own usage/testing notes.
+
+### Setup (in addition to Phase 6's)
+
+```bash
+pnpm --filter @lybid/admin-dashboard dev   # http://localhost:5174, needs VITE_API_BASE_URL (defaults to localhost:3000)
+```
+
+No migration — this phase adds no new tables, only new routes/services plus the small `AdminJwtGuard` auth-context widening.
+
+### Testing
+
+`test/e2e/admin-dashboard.e2e-spec.ts` (backend): every new admin route's cross-tenant case 404s (list, detail, decide, review, image — the ownership-check bug class this phase's own comments call out), an admin-triggered decide+review producing a real `NEEDS_REVIEW` → `APPROVED` transition with `reviewerId` equal to the admin's real email (not client-supplied), the image endpoint returning the real uploaded bytes with the right `Content-Type`, and every route rejecting a request with no admin JWT at all. Full suite (12 files, 75 tests) re-run alongside this, since this phase touches shared decisioning-service code.
+
+`@lybid/admin-dashboard`'s own Vitest suite (5 tests) covers the API client's auth-header wiring and error handling, and the login → redirect flow. Verified end-to-end against the real running API in a real browser: logged in for real, created a real tenant/API key/applicant, uploaded a real document, and confirmed the tenant-detail and applicant-detail pages render real data — including the image-proxy pipeline actually returning and rendering real image bytes, the highest-risk new code path this phase added. See the package README for the full account.
+
 ### Roadmap
 
 0. Scaffolding & multi-tenant core (this phase)

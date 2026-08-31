@@ -1,7 +1,22 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { Business, DecisionStatus, Prisma } from '@prisma/client';
+import type {
+  Business,
+  BusinessDecision,
+  BusinessDocument,
+  BusinessDocumentExtraction,
+  DecisionStatus,
+  Prisma,
+} from '@prisma/client';
 import { RequestContextService } from '../../database/tenant-context';
 import type { CreateBusinessDto } from './dto/create-business.dto';
+
+// Mirrors ApplicantsService's AdminApplicantDetail exactly, for Business.
+export interface AdminBusinessDetail extends Business {
+  documents: (BusinessDocument & {
+    extractions: BusinessDocumentExtraction[];
+  })[];
+  decisions: BusinessDecision[];
+}
 
 @Injectable()
 export class BusinessesService {
@@ -51,6 +66,60 @@ export class BusinessesService {
     const business = await tx.business.findUnique({ where: { id } });
     if (!business || business.deletedAt) {
       throw new NotFoundException(`Business ${id} not found`);
+    }
+    return business;
+  }
+
+  // --- Phase 7 (admin dashboard) — explicit-tenantId variants ---
+  // See ApplicantsService's identical section for the full rationale.
+
+  async listForTenant(
+    tenantId: string,
+    decisionStatus?: DecisionStatus,
+  ): Promise<Business[]> {
+    const tx = this.requestContext.requireTx();
+    return tx.business.findMany({
+      where: {
+        tenantId,
+        deletedAt: null,
+        ...(decisionStatus ? { latestDecisionStatus: decisionStatus } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getForTenantOrThrow(tenantId: string, id: string): Promise<Business> {
+    const tx = this.requestContext.requireTx();
+    const business = await tx.business.findFirst({
+      where: { id, tenantId, deletedAt: null },
+    });
+    if (!business) {
+      throw new NotFoundException(
+        `Business ${id} not found for tenant ${tenantId}`,
+      );
+    }
+    return business;
+  }
+
+  async getDetailForTenant(
+    tenantId: string,
+    id: string,
+  ): Promise<AdminBusinessDetail> {
+    const tx = this.requestContext.requireTx();
+    const business = await tx.business.findFirst({
+      where: { id, tenantId, deletedAt: null },
+      include: {
+        documents: {
+          orderBy: { uploadedAt: 'desc' },
+          include: { extractions: { orderBy: { createdAt: 'desc' }, take: 1 } },
+        },
+        decisions: { orderBy: { createdAt: 'desc' } },
+      },
+    });
+    if (!business) {
+      throw new NotFoundException(
+        `Business ${id} not found for tenant ${tenantId}`,
+      );
     }
     return business;
   }

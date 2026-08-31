@@ -14,7 +14,7 @@ export type RequestAuthContext =
       // see the applicant-session plan for why this is safe.
       apiKeyId?: string;
     }
-  | { mode: 'admin'; adminId: string }
+  | { mode: 'admin'; adminId: string; email: string }
   // A short-lived token scoped to exactly one applicant, minted via
   // ApplicantTokensModule and consumed only by ApplicantSessionModule's
   // routes — see the applicant-session plan for the full design. Carries

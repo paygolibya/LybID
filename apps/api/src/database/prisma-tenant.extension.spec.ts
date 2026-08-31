@@ -8,7 +8,11 @@ const tenantAuth: RequestAuthContext = {
   apiKeyId: 'key-1',
 };
 
-const adminAuth: RequestAuthContext = { mode: 'admin', adminId: 'admin-1' };
+const adminAuth: RequestAuthContext = {
+  mode: 'admin',
+  adminId: 'admin-1',
+  email: 'admin@example.com',
+};
 
 describe('applyTenantScoping', () => {
   it('passes non-tenant-scoped models through untouched, even with no auth context', () => {
