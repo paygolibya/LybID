@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  NotFoundException,
   Param,
   Res,
   StreamableFile,
@@ -10,7 +11,10 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { AdminJwtGuard } from '../../common/guards/admin-jwt.guard';
 import { DocumentsService } from './documents.service';
-import { StorageService } from './storage/storage.service';
+import {
+  isNotFoundStorageError,
+  StorageService,
+} from './storage/storage.service';
 
 // The system's first-ever endpoint that serves a stored document back out
 // — MinIO is otherwise purely internal (written by upload, read only by
@@ -42,7 +46,20 @@ export class AdminDocumentsController {
       tenantId,
       id,
     );
-    const buffer = await this.storageService.getObject(document.storageKey);
+    // Phase 8: a Document row can outlive its MinIO object now that
+    // erasure (ApplicantsService.erase()) deletes the object but keeps the
+    // row — storageKey is a required column, so it can't be nulled to
+    // signal this. Translate the resulting not-found into a 404 rather
+    // than an unhandled 500.
+    let buffer: Buffer;
+    try {
+      buffer = await this.storageService.getObject(document.storageKey);
+    } catch (err) {
+      if (isNotFoundStorageError(err)) {
+        throw new NotFoundException(`Document ${id}'s image has been erased`);
+      }
+      throw err;
+    }
     res.set({
       'Content-Type': document.mimeType,
       'Content-Disposition': `inline; filename="${document.originalFilename}"`,

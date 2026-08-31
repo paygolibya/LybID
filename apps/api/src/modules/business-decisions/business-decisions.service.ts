@@ -10,6 +10,7 @@ import type {
   Prisma,
 } from '@prisma/client';
 import { RequestContextService } from '../../database/tenant-context';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { BusinessesService } from '../businesses/businesses.service';
 import type { ReviewBusinessDecisionDto } from './dto/review-business-decision.dto';
 
@@ -34,6 +35,7 @@ export class BusinessDecisionsService {
   constructor(
     private readonly requestContext: RequestContextService,
     private readonly businessesService: BusinessesService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   /** Mirrors ApplicantDecisionsService.decide() exactly — see its comments
@@ -160,6 +162,14 @@ export class BusinessDecisionsService {
     await tx.business.update({
       where: { id: business.id },
       data: { latestDecisionStatus: dto.status },
+    });
+
+    // See ApplicantDecisionsService.review()'s identical comment.
+    await this.auditLog.recordForCurrentActor({
+      action: 'business.decision.review',
+      targetType: 'business_decision',
+      targetId: decision.id,
+      metadata: { businessId: business.id, status: dto.status },
     });
 
     return decision;

@@ -7,7 +7,6 @@ import {
   createApplicant,
   createBusiness,
   createTenantWithApiKey,
-  createTestAppWithStubOcr,
   createTestAppWithStubOcrAndBiometrics,
   getOwnerClient,
   loginAsTestAdmin,
@@ -134,7 +133,11 @@ describe('Admin dashboard endpoints (e2e, stubbed OCR + biometrics)', () => {
 
   describe('applicants', () => {
     it('lists and fetches applicant detail scoped to the right tenant', async () => {
-      const tenant = await createTenantWithApiKey(app, adminToken, 'admin-dash-a1');
+      const tenant = await createTenantWithApiKey(
+        app,
+        adminToken,
+        'admin-dash-a1',
+      );
       const applicantId = await createApplicant(app, tenant.token, {
         externalId: 'a-1',
       });
@@ -163,8 +166,16 @@ describe('Admin dashboard endpoints (e2e, stubbed OCR + biometrics)', () => {
     });
 
     it('404s an applicant list/detail/decision/image request scoped to the wrong tenant', async () => {
-      const tenantA = await createTenantWithApiKey(app, adminToken, 'admin-dash-a2a');
-      const tenantB = await createTenantWithApiKey(app, adminToken, 'admin-dash-a2b');
+      const tenantA = await createTenantWithApiKey(
+        app,
+        adminToken,
+        'admin-dash-a2a',
+      );
+      const tenantB = await createTenantWithApiKey(
+        app,
+        adminToken,
+        'admin-dash-a2b',
+      );
       const applicantId = await createApplicant(app, tenantA.token, {
         externalId: 'a-iso',
       });
@@ -196,7 +207,11 @@ describe('Admin dashboard endpoints (e2e, stubbed OCR + biometrics)', () => {
     });
 
     it('admin-triggered decide + review work, and reviewerId is the admin email, not client-supplied', async () => {
-      const tenant = await createTenantWithApiKey(app, adminToken, 'admin-dash-a3');
+      const tenant = await createTenantWithApiKey(
+        app,
+        adminToken,
+        'admin-dash-a3',
+      );
       const applicantId = await createApplicant(app, tenant.token, {
         externalId: 'a-3',
       });
@@ -206,14 +221,22 @@ describe('Admin dashboard endpoints (e2e, stubbed OCR + biometrics)', () => {
       // to the real ApplicantDecisionsService.decide(), not a parallel/
       // looser implementation.
       await request(app.getHttpServer())
-        .post(`/admin/tenants/${tenant.tenantId}/applicants/${applicantId}/decision`)
+        .post(
+          `/admin/tenants/${tenant.tenantId}/applicants/${applicantId}/decision`,
+        )
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(400);
 
-      await setUpApplicantForDecision(tenant.token, applicantId, FAILING_BIOMETRICS);
+      await setUpApplicantForDecision(
+        tenant.token,
+        applicantId,
+        FAILING_BIOMETRICS,
+      );
 
       const decideRes = await request(app.getHttpServer())
-        .post(`/admin/tenants/${tenant.tenantId}/applicants/${applicantId}/decision`)
+        .post(
+          `/admin/tenants/${tenant.tenantId}/applicants/${applicantId}/decision`,
+        )
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(201);
       expect(decideRes.body.status).toBe('NEEDS_REVIEW');
@@ -234,7 +257,11 @@ describe('Admin dashboard endpoints (e2e, stubbed OCR + biometrics)', () => {
     });
 
     it('serves the real document bytes through the image endpoint', async () => {
-      const tenant = await createTenantWithApiKey(app, adminToken, 'admin-dash-a4');
+      const tenant = await createTenantWithApiKey(
+        app,
+        adminToken,
+        'admin-dash-a4',
+      );
       const applicantId = await createApplicant(app, tenant.token, {
         externalId: 'a-4',
       });
@@ -249,7 +276,11 @@ describe('Admin dashboard endpoints (e2e, stubbed OCR + biometrics)', () => {
     });
 
     it('rejects every admin route without an admin JWT (401)', async () => {
-      const tenant = await createTenantWithApiKey(app, adminToken, 'admin-dash-a5');
+      const tenant = await createTenantWithApiKey(
+        app,
+        adminToken,
+        'admin-dash-a5',
+      );
       await request(app.getHttpServer())
         .get(`/admin/tenants/${tenant.tenantId}/applicants`)
         .expect(401);
@@ -272,7 +303,8 @@ describe('Admin dashboard endpoints (e2e, stubbed OCR + biometrics)', () => {
           .get(`/v1/business-documents/${res.body.id}`)
           .set('X-API-Key', tenantToken)
           .expect(200);
-        return doc.body.status !== 'UPLOADED' && doc.body.status !== 'PROCESSING'
+        return doc.body.status !== 'UPLOADED' &&
+          doc.body.status !== 'PROCESSING'
           ? doc.body
           : false;
       });
@@ -280,8 +312,16 @@ describe('Admin dashboard endpoints (e2e, stubbed OCR + biometrics)', () => {
     }
 
     it('lists and fetches business detail scoped to the right tenant, 404s cross-tenant', async () => {
-      const tenantA = await createTenantWithApiKey(app, adminToken, 'admin-dash-b1a');
-      const tenantB = await createTenantWithApiKey(app, adminToken, 'admin-dash-b1b');
+      const tenantA = await createTenantWithApiKey(
+        app,
+        adminToken,
+        'admin-dash-b1a',
+      );
+      const tenantB = await createTenantWithApiKey(
+        app,
+        adminToken,
+        'admin-dash-b1b',
+      );
       const businessId = await createBusiness(app, tenantA.token, {
         externalId: 'biz-1',
       });

@@ -39,6 +39,7 @@ export class TenantsService {
       action: 'tenant.created',
       targetType: 'tenant',
       targetId: tenant.id,
+      tenantId: tenant.id,
       metadata: { name: tenant.name, slug: tenant.slug },
     });
 
@@ -77,6 +78,7 @@ export class TenantsService {
       action: status === 'ACTIVE' ? 'tenant.activated' : 'tenant.suspended',
       targetType: 'tenant',
       targetId: tenant.id,
+      tenantId: tenant.id,
     });
 
     return tenant;

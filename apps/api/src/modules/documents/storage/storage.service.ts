@@ -63,4 +63,35 @@ export class StorageService implements OnModuleInit {
     }
     return Buffer.concat(chunks);
   }
+
+  /**
+   * Phase 8 (bank-triggered erasure). Tolerant of the object already being
+   * gone — erasure must be safe to retry (a prior attempt that deleted the
+   * object but failed before completing its DB writes shouldn't turn a
+   * retry into a hard error). MinIO's client throws NoSuchKey for a
+   * missing object; every other error still propagates.
+   */
+  async deleteObject(key: string): Promise<void> {
+    try {
+      await this.client.removeObject(this.bucket, key);
+    } catch (err) {
+      if (isNotFoundStorageError(err)) return;
+      throw err;
+    }
+  }
+}
+
+/**
+ * Shared predicate for both getObject() and deleteObject()'s "was this
+ * object simply missing" case — pulled out so the two admin image-proxy
+ * controllers (the only other callers of getObject()) can translate a
+ * missing object into a 404 without each re-deriving what a MinIO
+ * not-found error looks like. Deliberately not thrown as a NestJS
+ * exception from inside this module — StorageService stays a plain,
+ * HTTP-framework-agnostic wrapper (see its own class comment).
+ */
+export function isNotFoundStorageError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const code = (err as { code?: string }).code;
+  return code === 'NoSuchKey' || err.name === 'NoSuchKey';
 }

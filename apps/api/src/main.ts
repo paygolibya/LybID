@@ -5,10 +5,15 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import type { Env } from './config/env.validation';
+import { assertProductionSecretsAreNotPlaceholders } from './config/production-safety';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService<Env, true>);
+  // Phase 8: the cheapest possible guard against the single most damaging
+  // deployment mistake this platform could make — see the function's own
+  // comment. A no-op outside NODE_ENV=production.
+  assertProductionSecretsAreNotPlaceholders(config);
 
   // crossOriginResourcePolicy overridden from Helmet's default
   // ('same-origin') to 'cross-origin' — found by actually curling a real

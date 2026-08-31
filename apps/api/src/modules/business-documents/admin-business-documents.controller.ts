@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  NotFoundException,
   Param,
   Res,
   StreamableFile,
@@ -9,7 +10,10 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { AdminJwtGuard } from '../../common/guards/admin-jwt.guard';
-import { StorageService } from '../documents/storage/storage.service';
+import {
+  isNotFoundStorageError,
+  StorageService,
+} from '../documents/storage/storage.service';
 import { BusinessDocumentsService } from './business-documents.service';
 
 // Mirrors AdminDocumentsController exactly, for BusinessDocument — reuses
@@ -35,7 +39,20 @@ export class AdminBusinessDocumentsController {
       tenantId,
       id,
     );
-    const buffer = await this.storageService.getObject(document.storageKey);
+    // See AdminDocumentsController.getImage()'s identical comment —
+    // erasure (BusinessesService.erase()) can delete the MinIO object
+    // while the row survives.
+    let buffer: Buffer;
+    try {
+      buffer = await this.storageService.getObject(document.storageKey);
+    } catch (err) {
+      if (isNotFoundStorageError(err)) {
+        throw new NotFoundException(
+          `Business document ${id}'s image has been erased`,
+        );
+      }
+      throw err;
+    }
     res.set({
       'Content-Type': document.mimeType,
       'Content-Disposition': `inline; filename="${document.originalFilename}"`,

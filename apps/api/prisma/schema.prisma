@@ -175,6 +175,16 @@ model Applicant {
   updatedAt DateTime        @updatedAt
   deletedAt DateTime?
 
+  // Phase 8 (bank-triggered erasure) — deliberately a *separate* marker
+  // from deletedAt, not a reuse of it: deletedAt means "hidden from every
+  // read" everywhere else in this codebase (getOrThrow/list() both filter
+  // it), which is the wrong behavior for erasure — the whole point of
+  // keeping the decision history readable is defeated if the applicant
+  // row itself becomes unreachable. erasedAt marks "PII + document images
+  // purged, record intentionally still visible" instead; nothing filters
+  // on it.
+  erasedAt DateTime?
+
   // Phase 4: denormalized latest decision status, updated in the same
   // transaction as each new ApplicantDecision row — same "current state on
   // the parent, full history in a child table" shape as Document.status +
@@ -320,6 +330,10 @@ model Business {
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   deletedAt DateTime?
+
+  // Phase 8: mirrors Applicant.erasedAt exactly — see its comment for why
+  // this is deliberately separate from deletedAt.
+  erasedAt DateTime?
 
   // Phase 4: mirrors Applicant.latestDecisionStatus exactly — see its
   // comment for the full explanation.
@@ -488,6 +502,17 @@ model AuditLog {
   metadata   Json?
   createdAt  DateTime @default(now())
 
+  // Phase 8: nullable — a platform-admin action not performed on behalf of
+  // any one tenant (e.g. an admin login attempt) has no natural tenantId.
+  // Set whenever the action *is* tenant-associated (a tenant-triggered
+  // action, or an admin action on a specific tenant's resource) so
+  // GET /admin/audit-log can filter to one tenant's trail — the table has
+  // no other way to do that (actorId is the acting tenant/admin, not
+  // necessarily the tenant the action was about). Still not RLS-scoped —
+  // AuditLog remains intentionally unscoped, see the rls_setup migration.
+  tenantId String?
+
   @@index([targetType, targetId])
+  @@index([tenantId])
   @@map("audit_logs")
 }

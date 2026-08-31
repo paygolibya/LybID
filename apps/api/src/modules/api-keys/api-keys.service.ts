@@ -59,6 +59,7 @@ export class ApiKeysService {
       action: 'api_key.issued',
       targetType: 'api_key',
       targetId: created.id,
+      tenantId,
       metadata: {
         tenantId,
         environment: dto.environment,
@@ -100,6 +101,7 @@ export class ApiKeysService {
       action: 'api_key.revoked',
       targetType: 'api_key',
       targetId: id,
+      tenantId: existing.tenantId,
       metadata: { tenantId: existing.tenantId },
     });
 

@@ -290,6 +290,32 @@ No migration — this phase adds no new tables, only new routes/services plus th
 
 `@lybid/admin-dashboard`'s own Vitest suite (5 tests) covers the API client's auth-header wiring and error handling, and the login → redirect flow. Verified end-to-end against the real running API in a real browser: logged in for real, created a real tenant/API key/applicant, uploaded a real document, and confirmed the tenant-detail and applicant-detail pages render real data — including the image-proxy pipeline actually returning and rendering real image bytes, the highest-risk new code path this phase added. See the package README for the full account.
 
+## Phase 8 — Security / Retention / Audit Hardening
+
+The last hardening pass before Phase 9 (self-hosted deployment packaging). Three gaps this project carried since early on, each already flagged in an existing code comment before this phase closed them:
+
+**Audit**. `AuditLogService` gets a `GET /admin/audit-log` read endpoint (`tenantId?/targetType?/targetId?/action?/from?/to?/limit?` filters, capped at 500 — the one table here with no natural per-tenant growth bound) — its own Phase 0 comment had deferred this explicitly. Two changes made it usable beyond its original tenant/API-key call sites: `record()` now falls back to the plain (non-transactional) Prisma client when no request transaction is open yet (`POST /admin/auth/login` has no guard, so no transaction exists at the point a login attempt needs auditing — safe specifically because `audit_logs` has no RLS, confirmed in the `rls_setup` migration's own comment), and `actorType` widened from `'platform_admin'`-only to also accept `'tenant'`, with a new nullable `tenantId` column so the read endpoint can actually filter to one tenant's trail. New entries recorded: every admin login attempt (success *and* failure — the one piece of brute-force-relevant telemetry this system didn't have), every decision review (whether made via a tenant's own API key or the Phase 7 admin dashboard — both flow through the same service method), and every erasure (below).
+
+**Security**. `@nestjs/throttler`, wired globally with a moderate default (100 req/min) plus a strict override (5/min) on `POST /admin/auth/login` — the one truly public, credential-guessable endpoint in the whole platform, previously unthrottled. Also a startup safety check (`assertProductionSecretsAreNotPlaceholders`, `main.ts`): refuses to boot with `NODE_ENV=production` if `JWT_SECRET`/`API_KEY_PEPPER`/`APPLICANT_TOKEN_SECRET`/`ADMIN_BOOTSTRAP_PASSWORD` still equal their literal `.env.example` placeholder values — a cheap, direct guard against the single most damaging deployment mistake this platform could make.
+
+**Retention — bank-triggered erasure, confirmed with the user first**. This project has never been told a real regulatory retention period, and KYC/banking data usually has to be *kept*, not deleted on request — in tension with GDPR-style erasure. So Phase 8 built only what was confirmed: `POST /v1/applicants/:id/erase` and `POST /v1/businesses/:id/erase` (tenant API-key only — not reachable via an applicant-session token, no admin-dashboard mirror this phase), which delete every associated document's MinIO object and null its OCR-extracted PII, and null the applicant's/business's own declared identity fields. **Deliberately does not** touch `ApplicantDecision`/`BusinessDecision` rows or `BiometricCheck`'s scores/verdicts — those are the compliance record the confirmed scope says must survive. No automatic time-based purge job — out of scope until there's a real retention-period answer.
+
+A real design correction made mid-implementation, worth recording: erasure was first going to reuse `Applicant.deletedAt`/`Business.deletedAt` to mark an erased record, matching the existing soft-delete pattern — but `deletedAt` means "hidden from every read" everywhere else in this codebase (`getOrThrow`/`list()` both filter it), which would have made the "kept" decision history practically unreachable through any API the moment a record was erased, defeating the entire point of preserving it. Fixed before it shipped by adding a separate `erasedAt` marker instead — erasure purges PII and images but leaves the record (and its decision history) visible, exactly as intended.
+
+A second real bug, caught by the e2e suite hitting real Postgres, not guessed: reusing `ApplicantDecisionsService.decide()`/`.review()` from the Phase 7 admin dashboard (added last phase) relies on the tenant-scoping extension auto-injecting `tenantId`/`environment` on `.create()` — a no-op under admin auth, which threw a real `PrismaClientValidationError` the first time an admin-triggered review actually ran. Already fixed in `45a2126`'s follow-on work, recorded here since Phase 8's own new erasure services deliberately avoided the same trap from the start (both source `tenantId`/`environment` explicitly from the already-fetched row, correct under every auth mode).
+
+The Phase 7 admin image-proxy endpoints also gained a real fix this phase needed: a `Document`/`BusinessDocument` row can now outlive its MinIO object (once erased), so both `AdminDocumentsController`/`AdminBusinessDocumentsController` translate a missing-object error into a `404` instead of an unhandled `500`.
+
+### Setup (in addition to Phase 7's)
+
+```bash
+pnpm --filter api prisma:migrate   # applies AuditLog.tenantId + Applicant/Business.erasedAt
+```
+
+### Testing
+
+Three new e2e spec files (10 tests): `admin-auth-throttling.e2e-spec.ts` forces `NODE_ENV=production` around a burst of login attempts to prove the throttle guard is real, not just configured (every *other* e2e file needs throttling off — the shared test-app helper logs in as admin fresh in nearly every test's `beforeEach`, and the whole suite runs in well under a minute against one instance, which is exactly what surfaced this: a production-appropriate 5/min login limit started 429ing the test suite itself before this was scoped to production only). `audit-log.e2e-spec.ts` covers login-attempt auditing and the read endpoint's `tenantId` filter. `erasure.e2e-spec.ts` covers both applicant and business erasure: images genuinely gone (404, not 500), OCR PII nulled while the document row and its status survive, decision history untouched, the record still visible (not hidden), and cross-tenant erasure 404s. Full suite re-run alongside these (15 files, 85 tests) since this phase touches shared `AuditLogService` and CORS/boot config.
+
 ### Roadmap
 
 0. Scaffolding & multi-tenant core (this phase)

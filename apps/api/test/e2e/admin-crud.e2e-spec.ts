@@ -113,10 +113,15 @@ describe('Admin CRUD (e2e)', () => {
       .send({ environment: 'LIVE' })
       .expect(201);
 
+    // Phase 8: beforeEach's own loginAsTestAdmin() call now legitimately
+    // writes an 'admin.login.success' entry first — assert this test's own
+    // two actions are the *last* two entries, not the whole table's exact
+    // contents, so that (correct, intentional) background audit activity
+    // doesn't make this brittle.
     const logs = await owner.auditLog.findMany({
       orderBy: { createdAt: 'asc' },
     });
-    expect(logs.map((l) => l.action)).toEqual([
+    expect(logs.slice(-2).map((l) => l.action)).toEqual([
       'tenant.created',
       'api_key.issued',
     ]);

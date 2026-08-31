@@ -11,6 +11,7 @@ import type {
   Prisma,
 } from '@prisma/client';
 import { RequestContextService } from '../../database/tenant-context';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { ApplicantsService } from '../applicants/applicants.service';
 import type { ReviewApplicantDecisionDto } from './dto/review-applicant-decision.dto';
 
@@ -34,6 +35,7 @@ export class ApplicantDecisionsService {
   constructor(
     private readonly requestContext: RequestContextService,
     private readonly applicantsService: ApplicantsService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   /**
@@ -196,6 +198,19 @@ export class ApplicantDecisionsService {
     await tx.applicant.update({
       where: { id: applicant.id },
       data: { latestDecisionStatus: dto.status },
+    });
+
+    // Phase 8: a human overriding an automatic decision is exactly the
+    // kind of discretionary, compliance-sensitive action an audit trail
+    // exists for — decide() itself isn't logged (pure deterministic
+    // recompute, not a judgment call). recordForCurrentActor() derives
+    // the actor whether this was called via the tenant's own API key or
+    // the Phase 7 admin dashboard — both reach this same method.
+    await this.auditLog.recordForCurrentActor({
+      action: 'applicant.decision.review',
+      targetType: 'applicant_decision',
+      targetId: decision.id,
+      metadata: { applicantId: applicant.id, status: dto.status },
     });
 
     return decision;
