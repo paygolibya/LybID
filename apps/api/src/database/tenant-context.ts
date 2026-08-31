@@ -7,9 +7,27 @@ export type RequestAuthContext =
       mode: 'tenant';
       tenantId: string;
       environment: 'LIVE' | 'TEST';
-      apiKeyId: string;
+      // Optional — a background worker job that originated from an
+      // applicant-session upload (no API key involved) reconstructs this
+      // context with apiKeyId omitted. Never consulted by any
+      // scoping/RLS decision, only carried through as audit metadata —
+      // see the applicant-session plan for why this is safe.
+      apiKeyId?: string;
     }
-  | { mode: 'admin'; adminId: string };
+  | { mode: 'admin'; adminId: string }
+  // A short-lived token scoped to exactly one applicant, minted via
+  // ApplicantTokensModule and consumed only by ApplicantSessionModule's
+  // routes — see the applicant-session plan for the full design. Carries
+  // the same tenantId/environment shape as 'tenant' mode (so it gets the
+  // same tenant+environment auto-scoping) plus the one applicant it's
+  // restricted to; that finer restriction is enforced by the consuming
+  // module itself, not by the Prisma tenant-scoping extension.
+  | {
+      mode: 'applicant';
+      tenantId: string;
+      environment: 'LIVE' | 'TEST';
+      applicantId: string;
+    };
 
 export interface RequestClsStore {
   auth?: RequestAuthContext;

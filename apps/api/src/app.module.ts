@@ -9,6 +9,8 @@ import { DatabaseModule } from './database/database.module';
 import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { ApplicantDecisionsModule } from './modules/applicant-decisions/applicant-decisions.module';
+import { ApplicantSessionModule } from './modules/applicant-session/applicant-session.module';
+import { ApplicantTokensModule } from './modules/applicant-tokens/applicant-tokens.module';
 import { ApplicantsModule } from './modules/applicants/applicants.module';
 import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { BiometricChecksModule } from './modules/biometric-checks/biometric-checks.module';
@@ -40,6 +42,8 @@ import { QueueModule } from './queue/queue.module';
     ApplicantDecisionsModule,
     BusinessDecisionsModule,
     UsageModule,
+    ApplicantTokensModule,
+    ApplicantSessionModule,
     WhoamiModule,
   ],
   providers: [

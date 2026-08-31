@@ -38,20 +38,38 @@ export class RequestTransactionInterceptor implements NestInterceptor {
       return next.handle();
     }
 
-    if (auth.mode === 'tenant') {
-      return from(
-        this.prisma.openTenantTransaction(auth.tenantId, async (tx) => {
-          this.requestContext.setTx(tx);
-          return firstValueFrom(next.handle(), { defaultValue: undefined });
-        }),
-      );
+    // Exhaustive switch, not if/else — an if/else here once silently
+    // treated "not tenant" as "must be admin", which would have opened an
+    // ADMIN transaction (bypassing all tenant scoping) for the first mode
+    // added beyond those original two. The `never` in default makes a
+    // future mode added without updating this dispatch a compile error
+    // instead of a silent security gap.
+    switch (auth.mode) {
+      case 'tenant':
+      case 'applicant':
+        // Both carry the same tenantId — applicant-mode's *finer*
+        // restriction (to one specific applicant) is enforced by the
+        // consuming module itself, not at this layer. See the
+        // applicant-session plan.
+        return from(
+          this.prisma.openTenantTransaction(auth.tenantId, async (tx) => {
+            this.requestContext.setTx(tx);
+            return firstValueFrom(next.handle(), { defaultValue: undefined });
+          }),
+        );
+      case 'admin':
+        return from(
+          this.prisma.openAdminTransaction(async (tx) => {
+            this.requestContext.setTx(tx);
+            return firstValueFrom(next.handle(), { defaultValue: undefined });
+          }),
+        );
+      default: {
+        const _exhaustive: never = auth;
+        throw new Error(
+          `Unhandled auth mode in RequestTransactionInterceptor: ${JSON.stringify(_exhaustive)}`,
+        );
+      }
     }
-
-    return from(
-      this.prisma.openAdminTransaction(async (tx) => {
-        this.requestContext.setTx(tx);
-        return firstValueFrom(next.handle(), { defaultValue: undefined });
-      }),
-    );
   }
 }

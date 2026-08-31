@@ -184,6 +184,19 @@ export async function createTenantWithApiKey(
   };
 }
 
+/** Issues a short-lived, single-applicant session token via the real API — mirrors createTenantWithApiKey's "exercise the full stack" posture. */
+export async function issueApplicantSessionToken(
+  app: INestApplication,
+  apiKeyToken: string,
+  applicantId: string,
+): Promise<string> {
+  const res = await request(app.getHttpServer())
+    .post(`/v1/applicants/${applicantId}/session-token`)
+    .set('X-API-Key', apiKeyToken)
+    .expect(201);
+  return res.body.token as string;
+}
+
 export async function createApplicant(
   app: INestApplication,
   apiKeyToken: string,

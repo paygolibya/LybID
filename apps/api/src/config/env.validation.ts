@@ -20,6 +20,12 @@ export const envSchema = z.object({
   JWT_SECRET: z.string().min(16),
   JWT_EXPIRES_IN: z.string().default('8h'),
   API_KEY_PEPPER: z.string().min(16),
+  // A separate secret from JWT_SECRET (admin's) — deliberately independent
+  // trust domains even though both are just JWTs verified server-side; see
+  // the applicant-session plan. Short default expiry: this token is meant
+  // for one browser-side verification session, not a long-lived login.
+  APPLICANT_TOKEN_SECRET: z.string().min(16),
+  APPLICANT_TOKEN_EXPIRES_IN: z.string().default('30m'),
   ADMIN_BOOTSTRAP_EMAIL: z.string().email(),
   ADMIN_BOOTSTRAP_PASSWORD: z.string().min(8),
 

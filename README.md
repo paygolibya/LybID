@@ -210,6 +210,34 @@ pnpm --filter api prisma:migrate   # applies the new usage_records schema + RLS 
 
 Verified end-to-end against the real (non-stubbed) OCR sidecar: usage started at `0`, processing a real passport through real Tesseract brought both the tenant's own `GET /v1/usage` and the admin's `GET /admin/tenants/:id/usage` to `{ DOCUMENT_PROCESSED: 1 }` in agreement.
 
+## Applicant-Session Auth + CORS (backend groundwork for Phase 6)
+
+Every auth-guarded route so far requires either a bank's own long-lived `X-API-Key` or Marsa's admin JWT — neither is safe to hand to a browser. This adds a third, narrow auth mode so the (future) client capture SDK can run in an untrusted browser: a tenant's own backend calls `POST /v1/applicants/:applicantId/session-token` (guarded by its real API key — server-to-server only, never called from a browser) and gets back a token scoped to **exactly one applicant**, valid for `APPLICANT_TOKEN_EXPIRES_IN` (default `30m`). That token — not the API key — is what the browser actually uses, against a completely separate route tree: `POST/GET /v1/applicant-session/documents[/:id]` and `POST/GET /v1/applicant-session/biometric-checks[/:id]`. The existing `/v1/applicants/:id/documents` etc. routes are untouched; banks keep using their API key there exactly as before.
+
+Signed with its own secret (`APPLICANT_TOKEN_SECRET`), deliberately separate from the admin JWT's `JWT_SECRET` — two independent trust domains, even though both are just JWTs verified server-side. No DB-backed revocation (mirrors the existing admin-JWT precedent — pure signed-expiry, no session table); the short expiry is the mitigation for a leaked token, not a blocklist. The two `POST` routes take `applicantId` from the token claim, never a URL param — there's no "does the URL match the token" check to get wrong, it's structurally impossible to act on behalf of a different applicant. The two `GET`-by-id routes (no `applicantId` in their URL, by original design) check the fetched resource's `applicantId` against the token's after lookup, `404`ing (not `403`) on mismatch — the same "don't confirm the resource exists" idiom used everywhere else in this codebase.
+
+**Two real bugs this surfaced, found by reading the code, not guessed** — adding a third `RequestAuthContext` mode broke two places that silently assumed only two existed:
+1. `RequestTransactionInterceptor` dispatched with `if (auth.mode === 'tenant') {...} else {...admin...}` — a non-exhaustive `if/else`, not a `switch`. Left as-is, an `'applicant'`-mode request would have silently fallen into the `else` branch and opened an **admin transaction**, bypassing all tenant scoping for a token whose entire purpose is to be *more* restricted than a tenant key. Fixed with an exhaustive `switch` (`never`-typed default), so a future fourth mode is a compile error here too, not another silent gap.
+2. `prisma-tenant.extension.ts`'s scoping helper was typed to accept only the `'tenant'` variant — adding a third union member broke that type outright (a real compile error, not a subtle bug) once `applicant`-mode auth started flowing through the same code path. Fixed by widening it to a small structural type both `'tenant'` and `'applicant'` satisfy; the *finer* "only this one applicant" restriction is deliberately handled by `ApplicantSessionModule` itself, not this shared file — there's no generic way to know which field on which model means "applicant" across `Document`/`BiometricCheck`/etc. from here.
+
+**CORS**: permissive (`origin: true`, reflects any origin), global, `GET`/`POST` only for now. Deliberate, not an oversight — the real protection for the new routes is the token's own scoping, not an origin allowlist; CORS is a browser-enforced restriction on reading responses, so enabling it globally doesn't expose the existing API-key/admin routes to anything a malicious page could exploit (a browser script still can't produce a secret it was never given). **A real, separate bug found only by curling a real response with an `Origin` header, not assumed**: Helmet's default `Cross-Origin-Resource-Policy: same-origin` header is a *second*, independent browser check from CORS — even with `Access-Control-Allow-Origin` correctly set, that header would have silently blocked the SDK's `fetch()` calls in real browsers (works fine in curl/Postman, breaks silently in an actual browser, since neither of those tools enforce CORP). Fixed by overriding just that one Helmet option to `cross-origin`; every other Helmet default (CSP, HSTS, etc.) is untouched.
+
+### Setup (in addition to Phase 5's)
+
+```bash
+# apps/api/.env needs two new vars — see .env.example
+# APPLICANT_TOKEN_SECRET="..."      (separate from JWT_SECRET — generate a real random value beyond local dev)
+# APPLICANT_TOKEN_EXPIRES_IN="30m"
+```
+
+No migration — this phase adds no new tables.
+
+### Testing
+
+`applicant-session.e2e-spec.ts`: token issuance requires the real API key (`401` without one), a document uploads and processes through the token alone (no API key involved anywhere in that flow), a biometric check likewise, a garbage/malformed token is `401`, the tenant's own API key is rejected on applicant-session routes (wrong credential type entirely), a session token can't see another applicant's document (`404`), and a session token can't be used to mint another session token (issuance stays API-key-only). Full existing suite (69 tests, all 11 files) re-run repeatedly alongside this — this phase touches shared infrastructure (`RequestAuthContext`, the tenant-scoping extension, the transaction interceptor), so a regression anywhere else is exactly what those runs are for.
+
+Verified end-to-end against the real (non-stubbed) OCR sidecar: minted a real session token via curl with a real API key, used *only* that token (no API key at all) to upload a real passport, watched it reach `EXTRACTED` via real Tesseract through the token-scoped route. Confirmed via `curl -H "Origin: ..."` against a running server that both the CORS headers and the corrected `Cross-Origin-Resource-Policy: cross-origin` header are actually present on real responses, not just believed to be.
+
 ### Roadmap
 
 0. Scaffolding & multi-tenant core (this phase)

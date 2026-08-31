@@ -8,7 +8,8 @@ export interface BiometricCheckJobData {
   biometricCheckId: string;
   tenantId: string;
   environment: 'LIVE' | 'TEST';
-  apiKeyId: string;
+  // Optional — see UploadDocumentInput.apiKeyId's comment in documents.service.ts.
+  apiKeyId?: string;
 }
 
 /** Thin producer wrapper — the enqueue side of async biometric processing, mirrors ExtractionQueue. */

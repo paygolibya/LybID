@@ -70,9 +70,19 @@ const CREATE_MANY_OPERATIONS = new Set(['createMany']);
 /** field -> required value, e.g. { tenantId: 'abc', environment: 'LIVE' } */
 type ScopePairs = Record<string, string>;
 
+// Structural, not Extract<RequestAuthContext, {mode:'tenant'}> — 'tenant'
+// and 'applicant' modes both satisfy this shape, and both get identical
+// tenant+environment auto-scoping here. The *finer* "only this one
+// applicant" restriction for applicant-mode is deliberately NOT handled in
+// this file — there's no generic way to know which field on which model
+// means "applicant" across Document/BiometricCheck/etc. from here; that
+// check lives in ApplicantSessionModule instead. See the applicant-session
+// plan.
+type TenantScopedAuth = { tenantId: string; environment: 'LIVE' | 'TEST' };
+
 function scopePairsFor(
   config: { scopeField: string; environmentField?: string },
-  auth: Extract<RequestAuthContext, { mode: 'tenant' }>,
+  auth: TenantScopedAuth,
 ): ScopePairs {
   const pairs: ScopePairs = { [config.scopeField]: auth.tenantId };
   if (config.environmentField) {

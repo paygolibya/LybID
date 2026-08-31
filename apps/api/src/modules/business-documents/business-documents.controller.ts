@@ -55,7 +55,12 @@ export class BusinessDocumentsController {
       buffer: file.buffer,
       originalFilename: file.originalname,
       validated,
-      apiKeyId: tenant.apiKeyId,
+      // ApiKeyGuard always sets apiKeyId — it's only optional on
+      // CurrentTenantInfo because the applicant-session token reuses the
+      // same 'tenant'-shaped worker context without one. There's no
+      // applicant-session route for business documents, so this route
+      // only ever sees a real API key.
+      apiKeyId: tenant.apiKeyId!,
     });
   }
 

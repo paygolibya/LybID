@@ -18,7 +18,8 @@ const NEEDS_REVIEW_FACE_MATCH_DISTANCE_THRESHOLD = 0.6;
 
 export interface CreateBiometricCheckInput extends CreateBiometricCheckDto {
   applicantId: string;
-  apiKeyId: string;
+  // Optional — see UploadDocumentInput.apiKeyId's comment in documents.service.ts.
+  apiKeyId?: string;
 }
 
 @Injectable()

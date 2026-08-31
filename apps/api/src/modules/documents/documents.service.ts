@@ -30,7 +30,11 @@ export interface UploadDocumentInput {
   buffer: Buffer;
   originalFilename: string;
   validated: ValidatedFile;
-  apiKeyId: string;
+  // Optional — undefined when the upload came from an applicant-session
+  // token rather than a tenant API key. Only ever carried through to the
+  // extraction job payload as audit metadata, never consulted for any
+  // scoping decision. See the applicant-session plan.
+  apiKeyId?: string;
 }
 
 @Injectable()
