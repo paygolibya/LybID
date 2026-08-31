@@ -18,6 +18,7 @@ import { BusinessesModule } from './modules/businesses/businesses.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { HealthModule } from './modules/health/health.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
+import { UsageModule } from './modules/usage/usage.module';
 import { WhoamiModule } from './modules/whoami/whoami.module';
 import { QueueModule } from './queue/queue.module';
 
@@ -38,6 +39,7 @@ import { QueueModule } from './queue/queue.module';
     BusinessDocumentsModule,
     ApplicantDecisionsModule,
     BusinessDecisionsModule,
+    UsageModule,
     WhoamiModule,
   ],
   providers: [

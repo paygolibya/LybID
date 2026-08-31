@@ -7,6 +7,7 @@ import type {
 import { RequestContextService } from '../../database/tenant-context';
 import { BusinessesService } from '../businesses/businesses.service';
 import type { OcrExtractionResult } from '../documents/ocr-client/ocr-client.service';
+import { UsageService } from '../usage/usage.service';
 import type { ValidatedBusinessFile } from './business-file-validation.util';
 import { BusinessDocumentExtractionQueue } from './queue/business-document-extraction.queue';
 import { StorageService } from '../documents/storage/storage.service';
@@ -45,6 +46,7 @@ export class BusinessDocumentsService {
     private readonly businessesService: BusinessesService,
     private readonly storage: StorageService,
     private readonly extractionQueue: BusinessDocumentExtractionQueue,
+    private readonly usage: UsageService,
   ) {}
 
   async upload(input: UploadBusinessDocumentInput): Promise<BusinessDocument> {
@@ -177,6 +179,12 @@ export class BusinessDocumentsService {
         processedAt: new Date(),
       },
     });
+
+    // Phase 5: mirrors documents.service.ts's recordExtractionResult
+    // exactly — a real OCR outcome is billable, not attempted here for
+    // recordExtractionFailure below (that's infrastructure failure, not
+    // verification work done for the tenant).
+    await this.usage.recordBusinessDocumentProcessed(document.id);
   }
 
   /** The error itself is logged by the caller (the BullMQ processor) — this just records the terminal state. */

@@ -95,6 +95,10 @@ enum DecisionStatus {
   NEEDS_REVIEW
 }
 
+enum UsageEventType {
+  DOCUMENT_PROCESSED
+}
+
 model Tenant {
   id        String       @id @default(uuid())
   name      String
@@ -216,6 +220,10 @@ model Document {
   // document" from the Document side yet).
   biometricChecksAsSelfie    BiometricCheck[] @relation("BiometricCheckSelfie")
   biometricChecksAsReference BiometricCheck[] @relation("BiometricCheckReference")
+
+  // Opposite side of UsageRecord.document — required by Prisma. No query
+  // path reads this from the Document side either.
+  usageRecords UsageRecord[]
 
   @@index([tenantId])
   @@index([applicantId])
@@ -354,6 +362,9 @@ model BusinessDocument {
 
   extractions BusinessDocumentExtraction[]
 
+  // Opposite side of UsageRecord.businessDocument — required by Prisma.
+  usageRecords UsageRecord[]
+
   @@index([tenantId])
   @@index([businessId])
   @@index([sha256])
@@ -436,6 +447,33 @@ model BusinessDecision {
   @@index([tenantId])
   @@index([businessId])
   @@map("business_decisions")
+}
+
+// Phase 5: one billable usage event. Deliberately ONE unified table rather
+// than mirroring the "separate parallel tables for Applicant vs Business"
+// precedent every other phase used — billing's whole purpose is a
+// cross-cutting tenant-level total across both, so splitting this would
+// just make every reporting query UNION them back together. Exactly one of
+// documentId/businessDocumentId is set, depending on which pipeline
+// produced the event. See the Phase 5 plan for what counts as "processed"
+// (EXTRACTED/NEEDS_REVIEW, not FAILED — don't bill for our own
+// infrastructure failures).
+model UsageRecord {
+  id          String            @id @default(uuid())
+  tenantId    String
+  environment ApiKeyEnvironment
+  type        UsageEventType
+
+  documentId         String?
+  document           Document?         @relation(fields: [documentId], references: [id])
+  businessDocumentId String?
+  businessDocument   BusinessDocument? @relation(fields: [businessDocumentId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([createdAt])
+  @@map("usage_records")
 }
 
 // Schema-only for Phase 0 — no retention/deletion policy yet (that is a

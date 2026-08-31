@@ -103,7 +103,7 @@ export function getOwnerClient(): PrismaClient {
 
 export async function resetDatabase(owner: PrismaClient): Promise<void> {
   await owner.$executeRawUnsafe(
-    'TRUNCATE TABLE audit_logs, applicant_decisions, business_decisions, biometric_checks, business_document_extractions, business_documents, businesses, document_extractions, documents, applicants, api_keys, tenants, platform_admin_users RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE audit_logs, usage_records, applicant_decisions, business_decisions, biometric_checks, business_document_extractions, business_documents, businesses, document_extractions, documents, applicants, api_keys, tenants, platform_admin_users RESTART IDENTITY CASCADE',
   );
 }
 

@@ -188,6 +188,28 @@ pnpm --filter api prisma:migrate   # applies the new decision schema + RLS migra
 
 Verified end-to-end against the real (non-stubbed) OCR and biometrics sidecars: uploaded a real passport + birth certificate (both reached `EXTRACTED` via real Tesseract) and a non-face selfie (correctly `UNKNOWN`/`NEEDS_REVIEW` via the real dlib/MiniFASNet pipeline, same honest behavior Phase 2 already established for a non-face image) — `POST .../decision` correctly returned `NEEDS_REVIEW` with the full reasoning trail, the manual review endpoint correctly overrode it to `APPROVED`, and a second review attempt was correctly rejected with `400` since the latest decision was no longer `NEEDS_REVIEW`.
 
+## Phase 5 — Usage-Based Billing (Metering + Reporting)
+
+Tracks what a tenant has actually used, so real invoicing (however Marsa does it today — manually, outside this system) has real numbers behind it. Per the user's decisions: **metering + reporting only** in this phase — no payment processor, no generated invoices, no automatic charging (real payment integration is a substantial separate effort, better suited to its own later phase once there are real paying tenants). The billable unit is **documents processed**: each `Document` (Phase 1) or `BusinessDocument` (Phase 3) that reaches a genuine OCR outcome (`EXTRACTED` or `NEEDS_REVIEW`). **`FAILED` doesn't count** — that means the OCR sidecar itself errored, not that verification work was done; billing a tenant for LybID's own infrastructure failure would be wrong.
+
+**One unified `UsageRecord` table, unlike every prior phase's "always split into parallel Applicant/Business tables" precedent** — a deliberate exception, not an inconsistency: billing's entire purpose is a cross-tenant-level total across *both* kinds of document, so splitting would just make every reporting query `UNION` them back together. `UsageRecord` has two nullable FKs (`documentId`/`businessDocumentId`), exactly one set depending on which pipeline produced the event.
+
+`GET /v1/usage` (tenant-facing) and `GET /admin/tenants/:id/usage` (admin-facing, any tenant) both return `{ from, to, environment, counts: { DOCUMENT_PROCESSED: n }, total }`. Default date range is the current calendar month; default `environment` is `LIVE`.
+
+**A real design correction, caught by the e2e suite itself, worth recording**: the tenant-facing endpoint originally accepted an `?environment=` query param (mirroring the admin endpoint), on the theory that a tenant might want to see its `TEST`-key activity too. First real (not stubbed) run against it threw a 500 — the tenant-scoping Prisma extension treats an explicit `environment` filter that doesn't match the *authenticated key's own* environment as a scoping violation and refuses the query outright, which is actually correct behavior (a `LIVE` key structurally cannot see `TEST` data, by design, since Phase 1). The query param was simply nonsensical for a tenant caller — which environment they see is fixed by which key they used, not something to additionally filter. Fixed by dropping `environment` from the tenant-facing DTO entirely and always using the authenticated key's own environment; the query param stays *only* on the admin endpoint, where admin mode legitimately bypasses that scoping and can ask for either.
+
+### Setup (in addition to Phase 4's)
+
+```bash
+pnpm --filter api prisma:migrate   # applies the new usage_records schema + RLS migrations
+```
+
+### Testing
+
+`usage.e2e-spec.ts`: a processed document counts, a `FAILED` one doesn't, a `BusinessDocument` counts toward the same tenant total as a `Document`, a `LIVE` key's usage never includes the same tenant's `TEST`-key activity (and vice versa), the admin `?environment=` filter correctly separates a tenant's `LIVE` and `TEST` usage, usage is isolated per tenant, and an admin's view of a tenant's usage matches what that tenant sees itself. No new sidecar involved, so no new pytest suite this phase.
+
+Verified end-to-end against the real (non-stubbed) OCR sidecar: usage started at `0`, processing a real passport through real Tesseract brought both the tenant's own `GET /v1/usage` and the admin's `GET /admin/tenants/:id/usage` to `{ DOCUMENT_PROCESSED: 1 }` in agreement.
+
 ### Roadmap
 
 0. Scaffolding & multi-tenant core (this phase)

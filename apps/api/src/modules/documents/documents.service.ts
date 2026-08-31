@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Document, DocumentType, Prisma } from '@prisma/client';
 import { RequestContextService } from '../../database/tenant-context';
 import { ApplicantsService } from '../applicants/applicants.service';
+import { UsageService } from '../usage/usage.service';
 import type { ValidatedFile } from './file-validation.util';
 import type { OcrExtractionResult } from './ocr-client/ocr-client.service';
 import { ExtractionQueue } from './queue/extraction.queue';
@@ -39,6 +40,7 @@ export class DocumentsService {
     private readonly applicantsService: ApplicantsService,
     private readonly storage: StorageService,
     private readonly extractionQueue: ExtractionQueue,
+    private readonly usage: UsageService,
   ) {}
 
   async upload(input: UploadDocumentInput): Promise<Document> {
@@ -189,6 +191,12 @@ export class DocumentsService {
         processedAt: new Date(),
       },
     });
+
+    // Phase 5: a real OCR outcome (EXTRACTED or NEEDS_REVIEW, whichever it
+    // landed on above) is what's billable — not attempted here for
+    // recordExtractionFailure below, since that's LybID's own
+    // infrastructure failing, not verification work done for the tenant.
+    await this.usage.recordDocumentProcessed(document.id);
   }
 
   /** The error itself is logged by the caller (the BullMQ processor) — this just records the terminal state. */
