@@ -1,0 +1,49 @@
+# Example reverse proxy config for docker-compose.prod.yml's stack, using
+# Caddy (github.com/caddyserver/caddy) — not because Caddy is required,
+# but because it's a genuinely minimal, real example: Caddy issues and
+# renews its own Let's Encrypt TLS certificates automatically from just
+# the domain names below, no separate certbot/ACME setup. nginx or your
+# cloud load balancer's own TLS termination work exactly as well; this is
+# one concrete starting point, not a requirement.
+#
+# This file is NOT part of docker-compose.prod.yml on purpose — TLS
+# termination is deliberately left to the operator's own infrastructure
+# (see the root README's Phase 9 section for why), not automated by this
+# project. Copy this to a real Caddyfile, fill in your real domains, and
+# either run Caddy as its own container on the same Docker network as
+# docker-compose.prod.yml's stack, or on a separate host/load balancer
+# that can reach api:3000 / admin-dashboard:8080.
+#
+# NOTE — same Phase 9 caveat as every other file in this deployment
+# packaging pass: written carefully, never actually run (no working
+# Docker install on the machine this was written on).
+
+api.yourbank.example {
+	reverse_proxy api:3000
+}
+
+admin.yourbank.example {
+	reverse_proxy admin-dashboard:80
+}
+
+# If you're running Caddy as its own container, add it to
+# docker-compose.prod.yml something like this (not included there
+# directly, since your real domains/cert-storage volume are deployment-
+# specific):
+#
+#   caddy:
+#     image: caddy:2-alpine
+#     restart: unless-stopped
+#     ports:
+#       - "80:80"   # required for Let's Encrypt's HTTP-01 challenge
+#       - "443:443"
+#     volumes:
+#       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+#       - caddy_data:/data       # persists issued certificates across restarts
+#     depends_on:
+#       - api
+#       - admin-dashboard
+#
+# ...and add `caddy_data:` to that file's top-level `volumes:` block. Then
+# api/admin-dashboard no longer need their own `ports:` published to the
+# host at all — only Caddy does.

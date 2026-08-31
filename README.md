@@ -258,7 +258,7 @@ No migration, no new backend routes — this phase is pure frontend, consuming t
 
 `pnpm --filter @lybid/capture-sdk test` (Vitest): the step-sequencing state machine (11 tests) and the Welcome → capture-step transition + camera-unsupported fallback (2 tests), including an explicit assertion that no upload button or `<input type="file">` exists anywhere in the DOM.
 
-Verified end-to-end against the real running API from a genuinely separate origin (`demo/index.html` served on `:8080` against the API on `:3000`, real session token, real browser via headless Edge with a fake camera device) — see the package README for the full account, including the `process.env` bug above and an honest note on where headless automation's limits (no interactive driving) stopped the real-camera verification short of the full capture → completion flow.
+Verified end-to-end against the real running API from a genuinely separate origin (`demo/index.html` served on `:8080` against the API on `:3000`, real session token, real browser via headless Edge with a fake camera device) — see the package README for the full account, including the `process.env` bug above. A later pass added Playwright (`test-e2e/live-flow.mjs`) and drove the *entire* flow interactively — all three captures, real OCR/biometrics processing, through to the `Submitted` screen and the host page's `onComplete` firing, zero console errors — closing the gap left by headless screenshot mode's lack of interactive clicking.
 
 ## Phase 7 — Bank-Facing Admin Dashboard
 
@@ -330,6 +330,8 @@ The last phase. Everything up to here ran from source with `pnpm dev`/`pnpm star
 - **`docker-compose.prod.yml`** (new — separate from the existing `docker-compose.yml`, which stays local-dev-infra-only: a dev running `pnpm start:dev` doesn't want a containerized `api` competing for port 3000). The full stack: postgres, redis, minio, ocr, biometrics, api, admin-dashboard. **No TLS anywhere in this file** — every container speaks plain HTTP; your own reverse proxy (nginx/Caddy/a cloud load balancer) terminates TLS in front of this stack. Only `api` (3000) and `admin-dashboard` (8080→80) publish a port at all.
 - **`.env.production.example`** — same variables as `.env.example`, but every secret marked `GENERATE` instead of a working dev default, so copying it in unedited is obviously wrong at a glance — and `assertProductionSecretsAreNotPlaceholders()` (Phase 8) will refuse to boot if you do anyway.
 - `docker-compose.yml` also gained the `biometrics` service it should have had since Phase 2 — a pre-existing gap noticed while wiring the real deployment stack, fixed here since it costs nothing extra.
+- **A second real bug, found by re-reading this guide's own steps against the Dockerfile, not by running either**: the RLS-setup migration (Phase 0) creates the `lybid_app` runtime role with a hardcoded literal password, since migrations are static SQL and can't read `RUNTIME_DB_PASSWORD` from `.env` — telling operators to "generate a real one" in `.env.production.example` without a step that actually applies it to Postgres would have left the API unable to authenticate. Fixed with an explicit `ALTER ROLE` step in the deployment walkthrough below. Relatedly, `apps/api/Dockerfile` originally pruned devDependencies (`pnpm install --prod`) after build to keep the image smaller — until re-reading the deployment steps against it surfaced that `migrate deploy` and the seed script both need devDependency-only tools (`prisma`, `ts-node`) that a prune would have silently removed from the very image those commands run against. Fixed by not pruning — a real, known image-size tradeoff, but a working deploy matters more than a smaller one for a stack nobody's actually run yet.
+- **`Caddyfile.example`** (repo root, added in a follow-up pass) — a concrete, minimal reverse-proxy example (Caddy auto-manages its own Let's Encrypt certificates from just two domain names, no separate ACME setup), not a requirement — nginx or a cloud load balancer's own TLS termination work exactly as well. Still not part of `docker-compose.prod.yml` itself, same reasoning as before: TLS termination stays the operator's own infrastructure decision.
 
 ### Deploying
 
@@ -352,12 +354,26 @@ docker compose -f docker-compose.prod.yml up -d postgres redis minio ocr biometr
 # non-interactive production command, applies existing migrations only,
 # never generates new ones.
 docker compose -f docker-compose.prod.yml run --rm api node_modules/.bin/prisma migrate deploy
+
+# REQUIRED, not optional — found while writing this deployment guide:
+# the RLS-setup migration creates the lybid_app runtime role with a
+# hardcoded literal password ('lybid_app_dev_password'), because
+# migrations are static SQL and can't read RUNTIME_DB_PASSWORD from your
+# .env. Setting a real value in .env alone does NOT change what Postgres
+# actually has on file for the role — this step is what actually applies
+# it. Use the exact same value you put in RUNTIME_DB_PASSWORD/
+# RUNTIME_DATABASE_URL. Skipping this leaves the API unable to
+# authenticate as lybid_app no matter what your .env says.
+docker compose -f docker-compose.prod.yml exec postgres \
+  psql -U lybid_owner -d lybid -c \
+  "ALTER ROLE lybid_app WITH PASSWORD '<same value as RUNTIME_DB_PASSWORD>';"
+
 docker compose -f docker-compose.prod.yml run --rm api node_modules/.bin/ts-node prisma/seed.ts
 
 docker compose -f docker-compose.prod.yml up -d api admin-dashboard
 ```
 
-Point your own reverse proxy's TLS-terminated routes at `api:3000` and `admin-dashboard:8080`. Distribute `@lybid/capture-sdk`'s built `dist/capture-sdk.js` to banks integrating the capture widget however you prefer (your own CDN, or served as a static file from wherever you like) — it isn't part of this compose stack.
+Point your own reverse proxy's TLS-terminated routes at `api:3000` and `admin-dashboard:8080`. `Caddyfile.example` (repo root) is a concrete starting point — not a requirement, just a real, minimal example (Caddy auto-manages its own Let's Encrypt certificates from just the two domain names in that file, no separate ACME setup). Distribute `@lybid/capture-sdk`'s built `dist/capture-sdk.js` to banks integrating the capture widget however you prefer (your own CDN, or served as a static file from wherever you like) — it isn't part of this compose stack.
 
 ### Roadmap
 

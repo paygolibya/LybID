@@ -27,13 +27,18 @@ RUN pnpm --filter api build
 # not part of the npm-resolvable dependency tree `deploy` reconstructs
 # from the lockfile) can't be verified without a working Docker install
 # here, and a broken Prisma client is a silent-until-runtime failure mode.
-# Pruning devDependencies in place after build/generate are already done
-# is less elegant (ships a larger image — every workspace package's
-# node_modules, not just api's) but is something to reason through with
-# confidence without executing it: the generated client and compiled
-# dist/ are already on disk, and removing devDependency packages doesn't
-# touch either.
-RUN pnpm install --prod --frozen-lockfile
+#
+# Also deliberately NOT pruning devDependencies with `pnpm install --prod`
+# here, despite an earlier version of this file doing exactly that —
+# found the hard way (by re-reading the README's own deployment steps
+# against this Dockerfile, not by running it): the deployment walkthrough
+# runs `node_modules/.bin/prisma migrate deploy` and
+# `node_modules/.bin/ts-node prisma/seed.ts` against this same image, and
+# both `prisma` (the CLI) and `ts-node` are devDependencies — a --prod
+# prune would have silently made both operational commands fail with "no
+# such file". Keeping devDependencies ships a larger image, a real, known
+# tradeoff, but a working `migrate deploy`/seed step matters more than
+# image size for a deployment nobody's actually run yet.
 
 FROM node:20-slim AS runtime
 WORKDIR /repo
