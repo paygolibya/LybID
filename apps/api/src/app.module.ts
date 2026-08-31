@@ -1,10 +1,12 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { RequestTransactionInterceptor } from './common/interceptors/request-transaction.interceptor';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import type { Env } from './config/env.validation';
 import { validateEnv } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
 import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
@@ -31,12 +33,9 @@ import { QueueModule } from './queue/queue.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     // Phase 8: a moderate global default (no rate limiting existed
-    // anywhere in this system before). In-memory storage — fine for this
-    // platform's typical single-instance-per-bank deployment shape; a
-    // multi-instance deployment would need a shared (e.g. Redis-backed)
-    // store, not built here. AdminAuthController overrides this with a
-    // much stricter limit on the one truly public, credential-guessable
-    // endpoint in the system — see its own @Throttle().
+    // anywhere in this system before). AdminAuthController overrides this
+    // with a much stricter limit on the one truly public, credential-
+    // guessable endpoint in the system — see its own @Throttle().
     //
     // skipIf outside production: found the hard way — the e2e suite's own
     // test-app helper logs in as admin fresh in almost every test's
@@ -48,9 +47,26 @@ import { QueueModule } from './queue/queue.module';
     // any real guarantee, and the mechanism itself is still verified by a
     // dedicated e2e test that forces NODE_ENV=production for one isolated
     // app instance (see admin-auth-throttling.e2e-spec.ts).
-    ThrottlerModule.forRoot({
-      throttlers: [{ name: 'default', ttl: 60_000, limit: 100 }],
-      skipIf: () => process.env.NODE_ENV !== 'production',
+    //
+    // Storage is Redis-backed (@nest-lab/throttler-storage-redis), not
+    // the package's own in-memory default — reuses the same Redis this
+    // system already requires for BullMQ (REDIS_URL), no new
+    // infrastructure dependency. This is what makes the limit correct
+    // across more than one API replica: an in-memory store counts
+    // requests per-process, so a bank running multiple api replicas
+    // behind a load balancer would let each replica's own 5/min reset
+    // independently — a real gap for this platform's stated "drops into
+    // a bank's own infrastructure" framing, since nothing here assumes
+    // single-instance is the only real deployment shape.
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService<Env, true>) => ({
+        throttlers: [{ name: 'default', ttl: 60_000, limit: 100 }],
+        storage: new ThrottlerStorageRedisService(
+          config.get('REDIS_URL', { infer: true }),
+        ),
+        skipIf: () => process.env.NODE_ENV !== 'production',
+      }),
     }),
     DatabaseModule,
     QueueModule,
