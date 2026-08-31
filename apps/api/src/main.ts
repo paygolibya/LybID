@@ -29,12 +29,20 @@ async function bootstrap(): Promise<void> {
   // to anything a malicious page could exploit — a browser script still
   // can't produce a secret it was never given. `credentials` stays unset:
   // the SDK sends its token explicitly via the Authorization header, no
-  // cookies involved. Methods are limited to what's actually used today;
-  // revisit once Phase 7's dashboard needs browser-based PATCH/DELETE. See
-  // the applicant-session plan.
+  // cookies involved. Methods are limited to what's actually used today —
+  // this is the "revisit once Phase 7's dashboard needs browser-based
+  // PATCH" moment: found by curling a real CORS preflight (OPTIONS) from
+  // the dashboard's own origin, not assumed — GET/POST alone left
+  // Access-Control-Allow-Methods without PATCH, which would have silently
+  // blocked the dashboard's Suspend/Activate-tenant and Revoke-API-key
+  // buttons in every real browser despite curl, Vitest's mocked fetch, and
+  // even a real-browser smoke test that only happened to exercise GET
+  // pages all passing — the same class of gap as the Cross-Origin-
+  // Resource-Policy bug above. No DELETE route exists yet, so it stays
+  // off this list.
   app.enableCors({
     origin: true,
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
   app.useGlobalPipes(
