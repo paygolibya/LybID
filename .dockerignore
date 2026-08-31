@@ -1,0 +1,30 @@
+# Never copy the host's own node_modules into a build context — it can
+# contain platform-native binaries (e.g. bcrypt) built for the host OS,
+# not the container's; every Dockerfile in this repo installs fresh
+# inside the container instead.
+node_modules
+**/node_modules
+
+# Local build output — every Dockerfile rebuilds this itself.
+dist
+**/dist
+coverage
+**/coverage
+
+.git
+.gitignore
+
+# Real secrets never belong in a build context.
+.env
+.env.local
+**/.env
+**/.env.local
+
+# Python sidecars' own local virtualenvs (services/ocr/.venv,
+# services/biometrics/.venv) — irrelevant to any Node build, and large.
+**/.venv
+
+# Editor/OS noise.
+.vscode
+.idea
+*.log

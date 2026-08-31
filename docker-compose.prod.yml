@@ -1,0 +1,137 @@
+# The actual self-hosted deployment stack — deliberately a SEPARATE file
+# from docker-compose.yml (local-dev infra only: Postgres/Redis/MinIO/OCR/
+# biometrics, no api, no frontends). A developer running `pnpm start:dev`
+# doesn't want a containerized api competing for port 3000, and conflating
+# "convenience infra for local dev" with "the actual deployable stack"
+# would make both harder to reason about.
+#
+# NOTE — Phase 9, stated honestly: NOT verified with a real
+# `docker compose up` in this session (no working Docker install on the
+# dev machine this was written on — see the root README's Phase 9
+# section). First real run is the operator's own job.
+#
+# No TLS anywhere in this file — every container speaks plain HTTP. A
+# bank's own reverse proxy (nginx/Caddy/a cloud load balancer) terminates
+# TLS in front of this stack; this platform is meant to drop into a bank's
+# own infrastructure with their own networking/security policy, not
+# reimplement it. Only `api` (host port 3000) and `admin-dashboard` (host
+# port 8080, container port 80) need a route from that proxy —
+# postgres/redis/minio/ocr/biometrics have no published ports at all,
+# reachable only from other containers here.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: lybid_owner
+      # POSTGRES_OWNER_PASSWORD is new — plain-image bootstrap only, never
+      # read by the NestJS app itself (unlike every other var here, it's
+      # not in env.validation.ts). It exists purely so this file doesn't
+      # have to parse a password back out of a DATABASE_URL connection
+      # string (compose can't do that). It MUST be the exact same value
+      # you embedded in DATABASE_URL's password segment below — see
+      # .env.production.example's own comment on this.
+      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD}
+      POSTGRES_DB: lybid
+    volumes:
+      - lybid_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lybid_owner -d lybid"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - lybid_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    env_file: .env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - lybid_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ocr:
+    build: services/ocr
+    restart: unless-stopped
+    expose:
+      - "8000"
+
+  biometrics:
+    build: services/biometrics
+    restart: unless-stopped
+    expose:
+      - "8001"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Redundant with .env.production.example's own values (which already
+      # use these same container-network service names, not localhost) —
+      # kept here anyway as a defensive override: `environment:` wins over
+      # `env_file:` for the same key in Compose, so this stays correct even
+      # if an operator's real .env ends up with stale localhost-based
+      # values (e.g. copied from .env.example by mistake).
+      DATABASE_URL: postgresql://lybid_owner:${POSTGRES_OWNER_PASSWORD}@postgres:5432/lybid?schema=public
+      RUNTIME_DATABASE_URL: postgresql://lybid_app:${RUNTIME_DB_PASSWORD}@postgres:5432/lybid?schema=public
+      REDIS_URL: redis://redis:6379
+      OCR_SERVICE_URL: http://ocr:8000
+      BIOMETRICS_SERVICE_URL: http://biometrics:8001
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: "9000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      ocr:
+        condition: service_started
+      biometrics:
+        condition: service_started
+
+  admin-dashboard:
+    build:
+      context: .
+      dockerfile: apps/admin-dashboard/Dockerfile
+      args:
+        # Baked in at build time — see the Dockerfile's own comment.
+        # Defaults to reaching `api` by its published host port; override
+        # in .env if the admin dashboard is served from a different origin
+        # than where operators' browsers can reach port 3000 directly.
+        VITE_API_BASE_URL: ${ADMIN_DASHBOARD_API_BASE_URL:-http://localhost:3000}
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+volumes:
+  lybid_postgres_data:
+  lybid_redis_data:
+  lybid_minio_data:

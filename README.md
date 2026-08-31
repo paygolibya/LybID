@@ -316,6 +316,49 @@ pnpm --filter api prisma:migrate   # applies AuditLog.tenantId + Applicant/Busin
 
 Three new e2e spec files (10 tests): `admin-auth-throttling.e2e-spec.ts` forces `NODE_ENV=production` around a burst of login attempts to prove the throttle guard is real, not just configured (every *other* e2e file needs throttling off — the shared test-app helper logs in as admin fresh in nearly every test's `beforeEach`, and the whole suite runs in well under a minute against one instance, which is exactly what surfaced this: a production-appropriate 5/min login limit started 429ing the test suite itself before this was scoped to production only). `audit-log.e2e-spec.ts` covers login-attempt auditing and the read endpoint's `tenantId` filter. `erasure.e2e-spec.ts` covers both applicant and business erasure: images genuinely gone (404, not 500), OCR PII nulled while the document row and its status survive, decision history untouched, the record still visible (not hidden), and cross-tenant erasure 404s. Full suite re-run alongside these (15 files, 85 tests) since this phase touches shared `AuditLogService` and CORS/boot config.
 
+## Phase 9 — Self-Hosted Deployment Packaging
+
+The last phase. Everything up to here ran from source with `pnpm dev`/`pnpm start:dev` and a mix of Docker and portable-binary infra — nothing was ever packaged for a bank to actually stand up on their own infrastructure. This phase closes that: real Dockerfiles, a full deployment compose stack, a production env template, and this walkthrough.
+
+**Stated honestly, not glossed over**: Docker isn't usable on the machine this phase was written on — not on Windows PATH, not in WSL2, the same installation trouble documented back in Phase 0 (WSL2 disk corruption, UAC prompts not rendering over Remote Desktop), confirmed again while starting this phase. Every file below was written carefully against this project's own established Dockerfiles (`services/ocr/Dockerfile`, `services/biometrics/Dockerfile`) and pnpm's documented workspace-install behavior, but **none of it has been verified with a real `docker build` or `docker compose up`**. The first real build is yours. If something doesn't work exactly as written, that's the risk of shipping infrastructure code nobody could execute locally — please open an issue/fix it rather than assume it was tested and is just configured wrong.
+
+### What's new
+
+- **`apps/api/Dockerfile`** — multi-stage: installs the whole pnpm workspace (a workspace package can't be installed in isolation), runs `prisma generate` and `nest build`, then prunes devDependencies in place (`pnpm install --prod`) rather than using pnpm's own `deploy` command — `deploy`'s exact interaction with Prisma's generated-client output couldn't be verified here, and a silently-broken Prisma client is a worse failure mode than a larger image. Ships every workspace package's `node_modules`, not just `api`'s — a real, known size inefficiency, left as a future optimization once someone can actually test a leaner build.
+- **A real bug fixed in passing**: `apps/api/package.json`'s `start:prod` script was `node dist/main.js` — wrong. `nest build`'s actual output is `dist/src/main.js` (no explicit `rootDir` in `tsconfig.json`, so TypeScript preserves the `src/` folder). Nobody had noticed because every session so far used `start:dev`. Fixed directly; the Dockerfile's `CMD` uses the correct path.
+- **`apps/admin-dashboard/Dockerfile`** — Vite build (taking `VITE_API_BASE_URL` as a build `ARG` — it's baked into the static JS at build time, not overridable at container start, see the package's own README) into a slim `nginx:alpine` static-file stage, with an SPA-fallback `nginx.conf` (`try_files ... /index.html` — needed for React Router's client-side routes to survive a hard refresh). `@lybid/capture-sdk` is deliberately **not** containerized — it's a single static file a bank embeds on their own page, not a running service; build it and host `dist/capture-sdk.js` wherever you like.
+- **`docker-compose.prod.yml`** (new — separate from the existing `docker-compose.yml`, which stays local-dev-infra-only: a dev running `pnpm start:dev` doesn't want a containerized `api` competing for port 3000). The full stack: postgres, redis, minio, ocr, biometrics, api, admin-dashboard. **No TLS anywhere in this file** — every container speaks plain HTTP; your own reverse proxy (nginx/Caddy/a cloud load balancer) terminates TLS in front of this stack. Only `api` (3000) and `admin-dashboard` (8080→80) publish a port at all.
+- **`.env.production.example`** — same variables as `.env.example`, but every secret marked `GENERATE` instead of a working dev default, so copying it in unedited is obviously wrong at a glance — and `assertProductionSecretsAreNotPlaceholders()` (Phase 8) will refuse to boot if you do anyway.
+- `docker-compose.yml` also gained the `biometrics` service it should have had since Phase 2 — a pre-existing gap noticed while wiring the real deployment stack, fixed here since it costs nothing extra.
+
+### Deploying
+
+```bash
+cp .env.production.example .env
+# Edit .env: fill in every GENERATE placeholder (openssl rand -hex 32
+# for the secrets), set ADMIN_BOOTSTRAP_EMAIL to a real address, and set
+# ADMIN_DASHBOARD_API_BASE_URL to wherever your reverse proxy will
+# actually expose the API (not localhost, unless this really is a
+# same-machine smoke test).
+
+# Run every docker compose command from the repo root — it auto-loads
+# .env from the current directory for both container env vars and the
+# ${VAR} substitutions inside docker-compose.prod.yml itself.
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d postgres redis minio ocr biometrics
+
+# Migrations + the first admin user, run once against the now-healthy
+# database — `migrate deploy`, not `migrate dev`: the correct
+# non-interactive production command, applies existing migrations only,
+# never generates new ones.
+docker compose -f docker-compose.prod.yml run --rm api node_modules/.bin/prisma migrate deploy
+docker compose -f docker-compose.prod.yml run --rm api node_modules/.bin/ts-node prisma/seed.ts
+
+docker compose -f docker-compose.prod.yml up -d api admin-dashboard
+```
+
+Point your own reverse proxy's TLS-terminated routes at `api:3000` and `admin-dashboard:8080`. Distribute `@lybid/capture-sdk`'s built `dist/capture-sdk.js` to banks integrating the capture widget however you prefer (your own CDN, or served as a static file from wherever you like) — it isn't part of this compose stack.
+
 ### Roadmap
 
 0. Scaffolding & multi-tenant core (this phase)

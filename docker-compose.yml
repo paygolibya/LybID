@@ -51,6 +51,16 @@ services:
     expose:
       - "8000"
 
+  # Phase 2 — added here in Phase 9: this service existed since Phase 2 but
+  # was never wired into the local-dev compose file, so local setup instructions
+  # routed around Docker entirely for it (WSL2 + a slow from-source dlib
+  # build). Same internal-only posture as ocr.
+  biometrics:
+    build: services/biometrics
+    restart: unless-stopped
+    expose:
+      - "8001"
+
 volumes:
   lybid_postgres_data:
   lybid_redis_data:
