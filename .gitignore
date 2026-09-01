@@ -1,8 +1,16 @@
 node_modules/
 dist/
 build/
-.env
-.env.local
+# Security self-review finding: the old `.env`/`.env.local` pair didn't
+# cover a real, easy mistake — a locally-generated test env file (e.g.
+# .env.docker-test, made while smoke-testing the Phase 9 deployment stack
+# with real random secrets) sat untracked-but-NOT-ignored, one `git add -A`
+# away from being committed. Wildcarded, with explicit re-allows for the
+# two templates that are meant to be committed.
+.env*
+!.env.example
+!.env.production.example
+.docker-test-admin-pw.txt
 *.log
 coverage/
 .turbo/

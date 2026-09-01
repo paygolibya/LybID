@@ -320,11 +320,11 @@ Three new e2e spec files (10 tests): `admin-auth-throttling.e2e-spec.ts` forces 
 
 The last phase. Everything up to here ran from source with `pnpm dev`/`pnpm start:dev` and a mix of Docker and portable-binary infra — nothing was ever packaged for a bank to actually stand up on their own infrastructure. This phase closes that: real Dockerfiles, a full deployment compose stack, a production env template, and this walkthrough.
 
-**Stated honestly, not glossed over**: Docker isn't usable on the machine this phase was written on — not on Windows PATH, not in WSL2, the same installation trouble documented back in Phase 0 (WSL2 disk corruption, UAC prompts not rendering over Remote Desktop), confirmed again while starting this phase. Every file below was written carefully against this project's own established Dockerfiles (`services/ocr/Dockerfile`, `services/biometrics/Dockerfile`) and pnpm's documented workspace-install behavior, but **none of it has been verified with a real `docker build` or `docker compose up`**. The first real build is yours. If something doesn't work exactly as written, that's the risk of shipping infrastructure code nobody could execute locally — please open an issue/fix it rather than assume it was tested and is just configured wrong.
+**Originally written without a working Docker install** — the same WSL2/UAC trouble documented in Phase 0 — and shipped unverified. **Update: since fixed and actually run for real.** Docker now works on this machine via WSL2 + `apt` (`docker.io` + `docker-compose-v2`, not Docker Desktop — that path is still the one that failed repeatedly here) instead of the previously-blocked path. With a real Docker install, this phase got a real `docker compose build`, a real `docker compose up`, real migrations against a real Postgres in a container, and a real smoke test (an admin login through the deployed stack returning a working JWT) — not just careful reading. That real run is exactly what caught the bugs called out below (openssl, the migrate/seed command paths, the healthcheck) — every one of them was invisible to review and only surfaced by actually executing the thing. If you hit something this pass didn't catch, that's still a real possibility for infrastructure code — please open an issue rather than assume it's fully proven for every environment.
 
 ### What's new
 
-- **`apps/api/Dockerfile`** — multi-stage: installs the whole pnpm workspace (a workspace package can't be installed in isolation), runs `prisma generate` and `nest build`, then prunes devDependencies in place (`pnpm install --prod`) rather than using pnpm's own `deploy` command — `deploy`'s exact interaction with Prisma's generated-client output couldn't be verified here, and a silently-broken Prisma client is a worse failure mode than a larger image. Ships every workspace package's `node_modules`, not just `api`'s — a real, known size inefficiency, left as a future optimization once someone can actually test a leaner build.
+- **`apps/api/Dockerfile`** — multi-stage: installs the whole pnpm workspace (a workspace package can't be installed in isolation), runs `prisma generate` and `nest build`. Deliberately does **not** prune devDependencies (see the bug below) and doesn't use pnpm's own `deploy` command either — `deploy`'s exact interaction with Prisma's generated-client output wasn't worth risking, and a silently-broken Prisma client is a worse failure mode than a larger image. Ships every workspace package's `node_modules`, not just `api`'s — a real, known size inefficiency, left as a future optimization.
 - **A real bug fixed in passing**: `apps/api/package.json`'s `start:prod` script was `node dist/main.js` — wrong. `nest build`'s actual output is `dist/src/main.js` (no explicit `rootDir` in `tsconfig.json`, so TypeScript preserves the `src/` folder). Nobody had noticed because every session so far used `start:dev`. Fixed directly; the Dockerfile's `CMD` uses the correct path.
 - **`apps/admin-dashboard/Dockerfile`** — Vite build (taking `VITE_API_BASE_URL` as a build `ARG` — it's baked into the static JS at build time, not overridable at container start, see the package's own README) into a slim `nginx:alpine` static-file stage, with an SPA-fallback `nginx.conf` (`try_files ... /index.html` — needed for React Router's client-side routes to survive a hard refresh). `@lybid/capture-sdk` is deliberately **not** containerized — it's a single static file a bank embeds on their own page, not a running service; build it and host `dist/capture-sdk.js` wherever you like.
 - **`docker-compose.prod.yml`** (new — separate from the existing `docker-compose.yml`, which stays local-dev-infra-only: a dev running `pnpm start:dev` doesn't want a containerized `api` competing for port 3000). The full stack: postgres, redis, minio, ocr, biometrics, api, admin-dashboard. **No TLS anywhere in this file** — every container speaks plain HTTP; your own reverse proxy (nginx/Caddy/a cloud load balancer) terminates TLS in front of this stack. Only `api` (3000) and `admin-dashboard` (8080→80) publish a port at all.
@@ -332,6 +332,18 @@ The last phase. Everything up to here ran from source with `pnpm dev`/`pnpm star
 - `docker-compose.yml` also gained the `biometrics` service it should have had since Phase 2 — a pre-existing gap noticed while wiring the real deployment stack, fixed here since it costs nothing extra.
 - **A second real bug, found by re-reading this guide's own steps against the Dockerfile, not by running either**: the RLS-setup migration (Phase 0) creates the `lybid_app` runtime role with a hardcoded literal password, since migrations are static SQL and can't read `RUNTIME_DB_PASSWORD` from `.env` — telling operators to "generate a real one" in `.env.production.example` without a step that actually applies it to Postgres would have left the API unable to authenticate. Fixed with an explicit `ALTER ROLE` step in the deployment walkthrough below. Relatedly, `apps/api/Dockerfile` originally pruned devDependencies (`pnpm install --prod`) after build to keep the image smaller — until re-reading the deployment steps against it surfaced that `migrate deploy` and the seed script both need devDependency-only tools (`prisma`, `ts-node`) that a prune would have silently removed from the very image those commands run against. Fixed by not pruning — a real, known image-size tradeoff, but a working deploy matters more than a smaller one for a stack nobody's actually run yet.
 - **`Caddyfile.example`** (repo root, added in a follow-up pass) — a concrete, minimal reverse-proxy example (Caddy auto-manages its own Let's Encrypt certificates from just two domain names, no separate ACME setup), not a requirement — nginx or a cloud load balancer's own TLS termination work exactly as well. Still not part of `docker-compose.prod.yml` itself, same reasoning as before: TLS termination stays the operator's own infrastructure decision.
+
+### Real Docker verification (later pass) — three more bugs, only findable by running it
+
+Once Docker actually worked here (see above), a real `docker compose build` + `up` against this whole stack surfaced three more bugs that "carefully reasoned but unexecuted" infrastructure code can hide indefinitely:
+
+1. **`apps/api/Dockerfile` was missing `openssl`.** `node:20-slim` (Debian bookworm) ships no OpenSSL at all. Prisma's query engine shells out to `openssl version` at `prisma generate` time to pick the right engine binary; without it, it silently guessed the older `debian-openssl-1.1.x` target, which then failed at container *startup* (not build time) with `libssl.so.1.1: cannot open shared object file` — a hard crash on the very first request, invisible until something actually ran the container. Fixed by installing `openssl` in both the builder stage (so generation detects the real OpenSSL 3.0.x) and the runtime stage (so the engine's `libssl.so.3` dependency actually resolves).
+2. **The deployment guide's `migrate deploy`/seed commands pointed at the wrong path.** `docker compose run --rm api node_modules/.bin/prisma migrate deploy` failed with "Cannot find module '/repo/node_modules/.bin/prisma'" — in a pnpm workspace, `prisma` and `ts-node` are devDependencies of `apps/api` specifically, so pnpm symlinks their bins into `apps/api/node_modules/.bin/`, never the repo root's (which is where the image's `WORKDIR` sits). Fixed to `sh -c "cd apps/api && node_modules/.bin/prisma migrate deploy"` (same for the seed step) — `cd`-ing into `apps/api` also gets Prisma's schema auto-discovery working for free.
+3. **`admin-dashboard`'s `HEALTHCHECK` used `http://localhost/`, which never connects.** nginx's `listen 80;` only ever binds IPv4, but Alpine's musl libc resolves "localhost" to `::1` (IPv6) first — so the healthcheck was permanently "unhealthy" in `docker compose ps` even while the app served real traffic fine over IPv4 (which is what Docker's own port mapping and any real reverse proxy both use). Fixed to `http://127.0.0.1/`.
+
+With those three fixed, the full stack (postgres, redis, minio, ocr, biometrics, api, admin-dashboard) reached `healthy` together, all 14 migrations applied, the seed script created the first admin, and a real `POST /admin/auth/login` against the running container returned a working JWT — the deployment walkthrough below is now proven to work end to end, not just internally consistent.
+
+This same pass also ran the CI workflow's jobs for real locally via `act` (see `.github/workflows/ci.yml`'s own comment for what that found — one local-only `act`/`.env` footgun, no workflow bugs), did a security self-review (`SECURITY.md`), and ran real load tests against the API (`autocannon`) — none of that is a substitute for a genuine external pentest or a production load profile, but it's real signal from actually exercising the system rather than only reading it.
 
 ### Deploying
 
@@ -353,7 +365,18 @@ docker compose -f docker-compose.prod.yml up -d postgres redis minio ocr biometr
 # database — `migrate deploy`, not `migrate dev`: the correct
 # non-interactive production command, applies existing migrations only,
 # never generates new ones.
-docker compose -f docker-compose.prod.yml run --rm api node_modules/.bin/prisma migrate deploy
+#
+# `cd apps/api &&`, not a bare `node_modules/.bin/prisma` from the image's
+# WORKDIR — a real bug found by actually running this for the first time
+# (Phase 9's Docker work): in a pnpm workspace, `prisma` and `ts-node` are
+# devDependencies of apps/api specifically, so pnpm symlinks their bins
+# into apps/api/node_modules/.bin/, never into the repo root's
+# node_modules/.bin/ (which is where the container's WORKDIR sits). The
+# original command here failed with "Cannot find module
+# '/repo/node_modules/.bin/prisma'" the first time it was actually run.
+# `cd`-ing into apps/api also gets Prisma's own schema auto-discovery
+# (./prisma/schema.prisma relative to cwd) working with no extra flag.
+docker compose -f docker-compose.prod.yml run --rm api sh -c "cd apps/api && node_modules/.bin/prisma migrate deploy"
 
 # REQUIRED, not optional — found while writing this deployment guide:
 # the RLS-setup migration creates the lybid_app runtime role with a
@@ -363,12 +386,14 @@ docker compose -f docker-compose.prod.yml run --rm api node_modules/.bin/prisma 
 # actually has on file for the role — this step is what actually applies
 # it. Use the exact same value you put in RUNTIME_DB_PASSWORD/
 # RUNTIME_DATABASE_URL. Skipping this leaves the API unable to
-# authenticate as lybid_app no matter what your .env says.
+# authenticate as lybid_app no matter what your .env says — confirmed for
+# real: the api container crash-looped with a Prisma P1000 auth error
+# until this step was run.
 docker compose -f docker-compose.prod.yml exec postgres \
   psql -U lybid_owner -d lybid -c \
   "ALTER ROLE lybid_app WITH PASSWORD '<same value as RUNTIME_DB_PASSWORD>';"
 
-docker compose -f docker-compose.prod.yml run --rm api node_modules/.bin/ts-node prisma/seed.ts
+docker compose -f docker-compose.prod.yml run --rm api sh -c "cd apps/api && node_modules/.bin/ts-node prisma/seed.ts"
 
 docker compose -f docker-compose.prod.yml up -d api admin-dashboard
 ```

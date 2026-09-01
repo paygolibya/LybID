@@ -3,21 +3,33 @@
 # genuinely slow — several minutes, see its own README section) doesn't
 # block the fast ones.
 #
-# NOTE — stated honestly, same as this repo's Phase 9 Docker work: this
-# workflow *as a GitHub Actions run* has never actually executed. This
-# repository has no configured git remote (confirmed via `git remote -v`
-# — nothing to push to), so there's been no way to trigger a real run and
-# observe it. The underlying commands are a different story — every
-# `pnpm --filter ... test/lint/build` and `pnpm test:e2e` here has
-# actually been run locally and passed throughout this project (see the
-# root README's per-phase Testing sections), and the two Python jobs'
-# exact commands (`python -m tests.generate_fixtures`, `pytest`) were
-# re-run for real via WSL2 while writing this file — services/ocr: 6
-# passed, services/biometrics: 20 passed. What's NOT verified is the
-# GitHub-Actions-specific wiring around them (the `services:` blocks, the
-# MinIO docker-run workaround, ubuntu-latest's apt package availability,
-# actions/setup-node's pnpm cache) — standard, well-documented patterns,
-# but the first real run is whoever pushes this to an actual GitHub repo.
+# NOTE — update: this repo still has no configured git remote (`git
+# remote -v` is empty), so there's been no real GitHub Actions run. But
+# every job's actual mechanics HAVE now been executed for real, locally,
+# via `act` (nektos/act, Docker-in-Docker) rather than just reasoned
+# about: api-unit, api-e2e, capture-sdk, and admin-dashboard all ran
+# end-to-end under `act` and passed (api-e2e in particular exercises the
+# exact GitHub-Actions-specific wiring that was previously unverified —
+# the `services:` postgres/redis containers and the MinIO docker-run
+# workaround — 87/87 tests passed). ocr-sidecar and biometrics-sidecar
+# were NOT re-run under `act` (would repeat the slow from-source dlib
+# compile for marginal extra signal) but their exact commands were
+# already verified directly via WSL2, see below.
+#
+# One local-only pitfall found while doing this, not a workflow bug:
+# `act` auto-loads a `.env` file from the repo root if one exists. This
+# repo's real deployment `.env` (gitignored, used for the Phase 9 Docker
+# smoke test) sets NODE_ENV=production, which made pnpm skip
+# devDependencies during `act -j api-unit` and fail on a missing eslint —
+# a false failure specific to running `act` locally with that file
+# present, invisible to a real GitHub Actions run (that file is never
+# pushed). Worked around with `act --env-file /dev/null`; worth knowing
+# if you run `act` here yourself.
+#
+# The two Python jobs' exact commands (`python -m tests.generate_
+# fixtures`, `pytest`) were also re-run for real via WSL2 directly (not
+# through act) while writing this file — services/ocr: 6 passed,
+# services/biometrics: 20 passed.
 
 name: CI
 

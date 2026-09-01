@@ -3,16 +3,33 @@
 # pnpm-workspace.yaml, and every workspace package's own package.json to
 # resolve correctly. See docker-compose.prod.yml's `build.context`.
 #
-# NOTE — Phase 9, stated honestly: this Dockerfile has NOT been verified
-# with a real `docker build` in this session — Docker isn't usable on the
-# dev machine this was written on (not on Windows PATH, not in WSL2; the
-# same installation trouble documented in the root README's Phase 0
-# section). Written carefully against this project's own established
-# Dockerfiles (services/ocr/Dockerfile, services/biometrics/Dockerfile)
-# and pnpm's documented workspace-install behavior, but the first real
-# build is the operator's own job.
+# NOTE — Phase 9 update: this Dockerfile HAS now been verified with a real
+# `docker build` + `docker compose up` (WSL2 + apt Docker install, see the
+# root README's Phase 9 section) — a real `docker run hello-world`, then
+# this whole stack, actually ran. That real run caught the openssl bug
+# documented below, on top of the two found the same way in
+# services/biometrics/Dockerfile (git, onnxscript). Written originally
+# against this project's own established Dockerfiles (services/ocr/
+# Dockerfile, services/biometrics/Dockerfile) and pnpm's documented
+# workspace-install behavior, but "carefully reasoned" and "actually run"
+# turned out to be different things, same as biometrics.
 
+# openssl: a real bug found by actually running this container for the
+# first time (nobody had a working Docker install to catch this before).
+# `node:20-slim` is Debian bookworm and ships with NO openssl binary at
+# all — `prisma generate` shells out to `openssl version` to pick the
+# right query-engine binary, and Debian bookworm's actual runtime library
+# is OpenSSL 3.0.x. Without this, Prisma can't detect anything, silently
+# guesses the older "debian-openssl-1.1.x" target, and generates an
+# engine that fails at container startup with "libssl.so.1.1: cannot
+# open shared object file" — a hard crash on every request that touches
+# the database, not a build-time failure, so it stayed invisible until
+# the app was actually run. Needed in both stages: builder so `prisma
+# generate` detects the right target, runtime so the resulting engine's
+# libssl.so.3 dependency actually resolves.
 FROM node:20-slim AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 WORKDIR /repo
 COPY . .
@@ -41,6 +58,8 @@ RUN pnpm --filter api build
 # image size for a deployment nobody's actually run yet.
 
 FROM node:20-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /repo
 COPY --from=builder /repo ./
 ENV NODE_ENV=production

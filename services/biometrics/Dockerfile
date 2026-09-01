@@ -5,8 +5,14 @@
 # non-functional). torch is only ever needed here, at build time; it never
 # reaches the final runtime image.
 FROM python:3.11-slim AS model-convert
+# onnxscript: a second real bug found by actually building this image for
+# the first time — `pip install torch` (unpinned) resolved a newer torch
+# than this script was last run against, and recent torch versions moved
+# torch.onnx.export()'s internals to depend on onnxscript, which isn't
+# pulled in automatically. Without it: "ModuleNotFoundError: No module
+# named 'onnxscript'", failing the whole conversion step.
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir onnx onnxruntime numpy
+    && pip install --no-cache-dir onnx onnxscript onnxruntime numpy
 COPY scripts/convert_minifasnet.py /convert/convert_minifasnet.py
 RUN python /convert/convert_minifasnet.py /convert/models
 
@@ -15,7 +21,12 @@ FROM python:3.11-slim
 
 # cmake + a C++ toolchain + BLAS/LAPACK are needed to build dlib from source
 # (no prebuilt wheel for every platform/Python combination); poppler-utils
-# for pdf2image, same as services/ocr.
+# for pdf2image, same as services/ocr. git is required too — a real bug
+# found by actually running `docker build` for the first time (nobody had
+# a working Docker install to catch this before): requirements.txt
+# installs face_recognition_models via a `git+https://...` URL (it's not
+# on PyPI), and python:3.11-slim has no git at all, so pip failed with
+# "Cannot find command 'git'" before this was added.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
@@ -23,6 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     liblapack-dev \
     poppler-utils \
     libgl1 \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

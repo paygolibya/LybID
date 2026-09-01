@@ -5,10 +5,18 @@
 # "convenience infra for local dev" with "the actual deployable stack"
 # would make both harder to reason about.
 #
-# NOTE — Phase 9, stated honestly: NOT verified with a real
-# `docker compose up` in this session (no working Docker install on the
-# dev machine this was written on — see the root README's Phase 9
-# section). First real run is the operator's own job.
+# NOTE — Phase 9 update: this HAS now been verified with a real
+# `docker compose build` + `up` (WSL2 + apt Docker install, see the root
+# README's Phase 9 section) — every container reached healthy, a real
+# `prisma migrate deploy` applied all 14 migrations, the seed script
+# created the first admin, and a real POST /admin/auth/login through the
+# deployed stack returned a working JWT. That real run found and fixed
+# three bugs no amount of re-reading caught: apps/api/Dockerfile was
+# missing openssl (Prisma's engine couldn't load), the deployment guide's
+# migrate/seed commands pointed at the wrong node_modules/.bin path (pnpm
+# workspace bins live under apps/api/, not the repo root), and admin-
+# dashboard's HEALTHCHECK used "localhost" where only 127.0.0.1 resolves
+# inside the container. See each file's own comment for detail.
 #
 # No TLS anywhere in this file — every container speaks plain HTTP. A
 # bank's own reverse proxy (nginx/Caddy/a cloud load balancer) terminates

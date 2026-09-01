@@ -6,6 +6,11 @@
     "node": ">=20"
   },
   "packageManager": "pnpm@9.15.0",
+  "pnpm": {
+    "overrides": {
+      "multer": ">=2.2.0"
+    }
+  },
   "scripts": {
     "api": "pnpm --filter api",
     "dev": "pnpm --filter api start:dev",
@@ -17,5 +22,8 @@
     "prisma:seed": "pnpm --filter api prisma:seed",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down"
+  },
+  "devDependencies": {
+    "autocannon": "^8.0.0"
   }
 }
