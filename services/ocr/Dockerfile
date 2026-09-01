@@ -11,7 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# --timeout/--retries: pip's default 15s per-read timeout is too short for
+# a slow-but-sustained connection on a large wheel (opencv-python-headless
+# alone is 61MB) — found failing three times in a row on this exact
+# connection, always the same package, always a clean ReadTimeoutError
+# partway through, not a real download failure. Same class of fix as this
+# project's other retry/timeout hardening (e.g. the login rate limiter).
+RUN pip install --no-cache-dir --timeout 120 --retries 5 -r requirements.txt
 
 COPY app ./app
 
