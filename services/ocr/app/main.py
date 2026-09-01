@@ -60,8 +60,11 @@ async def extract(document_type: str = Form(...), file: UploadFile = File(...)) 
         # feed it the raw bytes, not our own preprocessed grayscale image.
         raw_text, fields, overall_confidence = extract_passport_fields(raw_bytes)
     elif document_type == "BIRTH_CERTIFICATE":
-        preprocessed = preprocess_for_ocr(image)
-        raw_text, fields, overall_confidence = extract_birth_certificate_fields(preprocessed)
+        # Raw image, not preprocess_for_ocr(image) — this extractor now
+        # runs its own multi-variant preprocessing internally (see its own
+        # module docstring for why one global preprocessing recipe wasn't
+        # enough on a real document).
+        raw_text, fields, overall_confidence = extract_birth_certificate_fields(image)
     elif document_type == "COMMERCIAL_REGISTRATION":
         preprocessed = preprocess_for_ocr(image)
         raw_text, fields, overall_confidence = extract_commercial_registration_fields(preprocessed)
