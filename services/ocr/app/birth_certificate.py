@@ -209,7 +209,16 @@ def _extract_fields_from_data(
         if found is None:
             continue
         label_words, keyword_rank = found
-        label_anchor = max(label_words, key=lambda w: w["left"])
+        # min, not max — the label word CLOSEST to the value box, not the
+        # phrase's outermost word. Real bug, found fixing the same code
+        # path in arabic_form.py: anchoring on the rightmost word of a
+        # multi-word phrase measures the gap from the wrong edge of the
+        # label box, artificially widening it. _MAX_HORIZONTAL_GAP_PX
+        # being 700 here (vs. arabic_form.py's untouched 400) was partly
+        # this same bug's effect, not purely genuine gap measurement —
+        # re-verified against the real document below that min() is still
+        # correct (or better) here, not just carried over blindly.
+        label_anchor = min(label_words, key=lambda w: w["left"])
         value_words = _find_value_to_left(words, label_words, label_anchor)
         if not value_words:
             continue
