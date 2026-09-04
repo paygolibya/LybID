@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* MRZ lines and numeric prices stay LTR even inside an RTL page — a
+   machine-readable zone is fixed Latin+digit format regardless of the
+   surrounding document's language, exactly as on a real passport. */
+.force-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
