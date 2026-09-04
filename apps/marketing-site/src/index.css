@@ -6,6 +6,13 @@ html {
   scroll-behavior: smooth;
 }
 
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid theme('colors.gold.DEFAULT');
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
 /* MRZ lines and numeric prices stay LTR even inside an RTL page — a
    machine-readable zone is fixed Latin+digit format regardless of the
    surrounding document's language, exactly as on a real passport. */

@@ -6,7 +6,7 @@ export function Hero() {
 
   return (
     <header className="px-8 pb-24 pt-20">
-      <div className="mx-auto grid max-w-6xl items-center gap-14 lg:grid-cols-[1.05fr_0.95fr]">
+      <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-14 lg:grid-cols-[1.05fr_0.95fr]">
         <div>
           <span className="font-mono text-[12.5px] font-medium uppercase tracking-[0.14em] text-verified">
             {t.hero.eyebrow}
@@ -37,12 +37,12 @@ export function Hero() {
 function IdCard() {
   const { t } = useLanguage();
   return (
-    <div className="relative w-full max-w-[400px]">
-      <span className="absolute -top-3.5 end-6 rotate-[4deg] rounded-full bg-gold px-3 py-1.5 font-mono text-[11px] font-medium text-ink shadow-lg">
+    <div className="relative w-full max-w-[400px] px-3 sm:px-0">
+      <span className="absolute -top-3.5 end-6 rounded-full bg-gold px-3 py-1.5 font-mono text-[11px] font-medium text-ink shadow-lg sm:rotate-[4deg]">
         {t.hero.card.sample}
       </span>
       <div
-        className="relative flex aspect-[1.586/1] -rotate-3 flex-col justify-between rounded-2xl p-6 text-paper shadow-2xl"
+        className="relative flex aspect-[1.586/1] flex-col justify-between rounded-2xl p-6 text-paper shadow-2xl sm:-rotate-3"
         style={{
           background:
             'repeating-linear-gradient(115deg, rgba(255,255,255,0.05) 0 1px, transparent 1px 7px), linear-gradient(155deg, #1C2016, #14170F)',
@@ -75,7 +75,7 @@ function IdCard() {
           </div>
         </div>
 
-        <div className="force-ltr border-t border-ink-3 pt-3 font-mono text-[12.5px] leading-[1.55] tracking-[0.04em] text-paper/55">
+        <div className="force-ltr border-t border-ink-3 pt-3 font-mono text-[8.5px] leading-[1.55] tracking-normal text-paper/55 sm:text-[12.5px] sm:tracking-[0.04em]">
           <div>
             P&lt;LBY<b className="font-normal text-gold">SAMPLE</b>&lt;&lt;APPLICANT&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;
           </div>
