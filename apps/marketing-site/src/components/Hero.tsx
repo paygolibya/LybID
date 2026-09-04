@@ -37,10 +37,7 @@ export function Hero() {
 function IdCard() {
   const { t } = useLanguage();
   return (
-    <div className="relative w-full max-w-[400px] px-3 sm:px-0">
-      <span className="absolute -top-3.5 end-6 rounded-full bg-gold px-3 py-1.5 font-mono text-[11px] font-medium text-ink shadow-lg sm:rotate-[4deg]">
-        {t.hero.card.sample}
-      </span>
+    <div className="relative w-full max-w-[400px] px-3 pt-3 sm:px-0 sm:pt-0">
       <div
         className="relative flex aspect-[1.586/1] flex-col justify-between rounded-2xl p-6 text-paper shadow-2xl sm:-rotate-3"
         style={{
@@ -48,6 +45,18 @@ function IdCard() {
             'repeating-linear-gradient(115deg, rgba(255,255,255,0.05) 0 1px, transparent 1px 7px), linear-gradient(155deg, #1C2016, #14170F)',
         }}
       >
+        {/* Child of the rotated card, not a sibling — a real bug fixed
+            here: this used to rotate independently at its own fixed
+            offset while the card rotated separately, so the two visually
+            drifted apart instead of the badge reading as a sticker
+            attached to the card's corner. Its own small counter-rotation
+            (relative to the card's already-applied -3deg) gives it a
+            slightly different angle than the card, like a sticker slapped
+            on at its own jaunty tilt — not fighting the card's rotation
+            entirely upright, either. */}
+        <span className="absolute -top-3.5 end-4 z-10 rotate-0 whitespace-nowrap rounded-full bg-gold px-3 py-1.5 font-mono text-[10px] font-medium text-ink shadow-lg sm:end-6 sm:rotate-[7deg] sm:text-[11px]">
+          {t.hero.card.sample}
+        </span>
         <div className="flex items-start justify-between">
           <span className="font-mono text-[11.5px] uppercase tracking-[0.12em] text-paper/55">
             {t.hero.card.brand}
