@@ -38,3 +38,6 @@ services/ocr/tests/fixtures/*.png
 # double-checked against the real on-disk path this time, not just copied
 # from memory.
 services/biometrics/app/models/
+
+.vercel
+.env*
