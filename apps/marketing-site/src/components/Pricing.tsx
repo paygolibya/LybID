@@ -13,7 +13,7 @@ export function Pricing() {
   const { t, fontDisplay, fontBody } = useLanguage();
 
   return (
-    <section id="pricing" className="px-8 py-24">
+    <section id="pricing" className="px-5 py-16 sm:px-8 sm:py-24">
       <div className="mx-auto max-w-6xl">
         <div className="mb-12 max-w-[620px]">
           <span className="font-mono text-[12.5px] font-medium uppercase tracking-[0.14em] text-verified">
@@ -27,7 +27,7 @@ export function Pricing() {
 
         <div className="grid max-w-[860px] grid-cols-1 gap-5 sm:grid-cols-2">
           {/* Basic — live now, gets the highlighted treatment */}
-          <div className="relative flex flex-col rounded-[20px] border-2 border-verified bg-paper p-8 shadow-lg">
+          <div className="relative flex flex-col rounded-[20px] border-2 border-verified bg-paper p-6 shadow-lg sm:p-8">
             <span className="absolute -top-3.5 start-7 rounded-full bg-verified px-3 py-1.5 text-[11.5px] font-semibold text-paper">
               {t.pricing.basic.badge}
             </span>
@@ -55,7 +55,7 @@ export function Pricing() {
           </div>
 
           {/* Professional — coming soon, quieter treatment */}
-          <div className="flex flex-col rounded-[20px] border border-paper-3 bg-paper-2 p-8">
+          <div className="flex flex-col rounded-[20px] border border-paper-3 bg-paper-2 p-6 sm:p-8">
             <span className="mb-3.5 inline-block w-fit rounded-full bg-paper-3 px-3 py-1.5 text-[11.5px] font-semibold text-ink/60">
               {t.pricing.pro.badge}
             </span>

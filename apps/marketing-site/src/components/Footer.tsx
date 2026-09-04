@@ -6,7 +6,7 @@ export function Footer() {
   const hrefs = ['#product', '#solutions', '#pricing', '#'];
 
   return (
-    <footer className="border-t border-ink-3 bg-ink px-8 py-11 text-paper">
+    <footer className="border-t border-ink-3 bg-ink px-5 py-11 text-paper sm:px-8">
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-wrap items-center justify-between gap-5">
           <div className="flex items-center gap-3">

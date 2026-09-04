@@ -5,7 +5,7 @@ export function FinalCta() {
   const { t, fontDisplay, fontBody } = useLanguage();
 
   return (
-    <section className="relative overflow-hidden bg-ink px-8 py-28 text-paper">
+    <section className="relative overflow-hidden bg-ink px-5 py-20 text-paper sm:px-8 sm:py-28">
       <svg
         viewBox="0 0 200 200"
         fill="none"

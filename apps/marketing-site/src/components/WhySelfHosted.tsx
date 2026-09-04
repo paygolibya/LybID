@@ -4,7 +4,7 @@ export function WhySelfHosted() {
   const { t, fontDisplay, fontBody } = useLanguage();
 
   return (
-    <section id="why" className="px-8 py-24">
+    <section id="why" className="px-5 py-16 sm:px-8 sm:py-24">
       <div className="mx-auto max-w-6xl">
         <div className="mb-12 max-w-[620px]">
           <span className="font-mono text-[12.5px] font-medium uppercase tracking-[0.14em] text-verified">

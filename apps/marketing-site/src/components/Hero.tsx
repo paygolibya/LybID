@@ -5,7 +5,7 @@ export function Hero() {
   const { t, fontDisplay, fontBody } = useLanguage();
 
   return (
-    <header className="px-8 pb-24 pt-20">
+    <header className="px-5 pb-16 pt-14 sm:px-8 sm:pb-24 sm:pt-20">
       <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-14 lg:grid-cols-[1.05fr_0.95fr]">
         <div>
           <span className="font-mono text-[12.5px] font-medium uppercase tracking-[0.14em] text-verified">

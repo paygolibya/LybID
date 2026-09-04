@@ -4,7 +4,7 @@ export function Solutions() {
   const { t, fontDisplay, fontBody } = useLanguage();
 
   return (
-    <section id="solutions" className="bg-ink px-8 py-24 text-paper">
+    <section id="solutions" className="bg-ink px-5 py-16 text-paper sm:px-8 sm:py-24">
       <div className="mx-auto max-w-6xl">
         <div className="mb-12 max-w-[620px]">
           <span className="font-mono text-[12.5px] font-medium uppercase tracking-[0.14em] text-gold">
