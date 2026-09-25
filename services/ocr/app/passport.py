@@ -181,6 +181,12 @@ _VALUE_SEARCH_HORIZONTAL_TOLERANCE_PX = 250
 _DATE_PATTERN = re.compile(r"^\d{4,8}\)?$")
 _PLACE_PATTERN = re.compile(r"^[A-Z]{3,}$")
 
+# "Signature of Bearer" — read cleanly on the one real document this was
+# tested against (unlike the three fields above, no garbling observed),
+# but kept as a keyword list rather than a single hardcoded string in
+# case a future real sample garbles it the way the others were.
+_SIGNATURE_LABEL_KEYWORDS = ["Signature of Bearer", "Signature"]
+
 
 def _extract_printed_fields(image_bytes: bytes) -> Tuple[List[ExtractedField], str]:
     array = np.frombuffer(image_bytes, dtype=np.uint8)
@@ -222,7 +228,54 @@ def _extract_printed_fields(image_bytes: bytes) -> Tuple[List[ExtractedField], s
                 confidence=0.55,
             )
         )
+
+    signature_field = _detect_signature_present(preprocessed, words)
+    if signature_field is not None:
+        fields.append(signature_field)
+
     return fields, raw_text
+
+
+def _detect_signature_present(preprocessed: np.ndarray, words: List[_Word]) -> Optional[ExtractedField]:
+    """The signature box is a presence check, not a text field — same
+    reasoning and same ink-density approach as
+    birth_certificate.py's official_stamp_present, adapted to this
+    module's "value sits below the label" geometry instead of
+    birth_certificate.py's "value sits to the label's left" (see module
+    docstring for why the layouts differ). Anchored on the detected
+    "Signature" label position, not a fixed template coordinate.
+
+    Returns None if the label was never found — an honest "we don't
+    know," not a false "absent."
+
+    `preprocessed` is expected to already be binary (the shared
+    preprocess_for_ocr's adaptiveThreshold output: ink pixels are 0,
+    background is 255) — checking `< 128` here would also work on a
+    grayscale image, but the ink-fraction THRESHOLD below (2%, same
+    starting guess as birth_certificate.py's, equally uncalibrated
+    beyond one real document) was tuned against this binary output
+    specifically."""
+    label = _find_label(words, _SIGNATURE_LABEL_KEYWORDS, [])
+    if label is None:
+        return None
+
+    box_top = max(0, label["top"] + _VALUE_SEARCH_MIN_GAP_PX)
+    box_bottom = min(preprocessed.shape[0], label["top"] + _VALUE_SEARCH_MAX_GAP_PX + 40)
+    box_left = max(0, label["left"] - 100)
+    box_right = min(preprocessed.shape[1], label["left"] + label["width"] + 150)
+    if box_bottom <= box_top or box_right <= box_left:
+        return None
+
+    region = preprocessed[box_top:box_bottom, box_left:box_right]
+    if region.size == 0:
+        return None
+    ink_fraction = float((region < 128).mean())
+    present = ink_fraction > 0.02
+    return ExtractedField(
+        name="signature_present",
+        value="true" if present else "false",
+        confidence=0.6,
+    )
 
 
 def _extract_words(data: dict) -> List[_Word]:
