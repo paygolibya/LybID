@@ -31,48 +31,51 @@ Round 1 — label-matching logic bugs (not image-quality):
    bug #2's masking effect and rejected every genuine value once #1/#2
    were fixed and the real gap (534-596px) was measurable. Now 700.
 
-Round 2 — the actual raw-character-recognition problem, confirmed to be
-real by fixing round 1 first (label matching alone recovered
-family_registry_number correctly, proving the logic was the bug there;
-full_name and most other fields still failed with CORRECT matching logic
-because Tesseract's raw text for those regions was simply unreadable
-garbage — a genuinely different problem, not a matching bug).
+Round 2 — the actual raw-character-recognition problem on a phone photo,
+confirmed to be real by fixing round 1 first (label matching alone
+recovered family_registry_number correctly, proving the logic was the
+bug there; full_name and most other fields still failed with CORRECT
+matching logic because Tesseract's raw text for those regions was simply
+unreadable garbage — a genuinely different problem, not a matching bug).
+Fixed by ensembling two phone-photo-tuned preprocessing variants
+("wide": 2.0x upscale, standard PSM; "cropped": blank the QR/barcode
+corners, 1.6x upscale, PSM 4) and merging per field.
 
-Investigated by scoring several preprocessing variants against every real
-token actually printed on a real test document (not just one target
-field, which is how the first upscale attempt silently traded one
-correct field for another). Finding: no single global preprocessing
-choice (a scale factor, a page-segmentation mode, threshold vs. none)
-was a clean win — each variant recovered a different, largely
-non-overlapping subset of the real fields. The best single variant found
-6 of 12 known real tokens; the two strongest variants together covered
-10 of 12. That's not one bug with one fix — real photographed official
-forms (small print, a boxed grid, uneven shading, a stamp/QR/barcode
-Tesseract's layout analysis doesn't need) apparently need more than one
-"read" to reliably get most fields right.
+Round 3 (2026-09-25) — a second real sample turned out to be a different
+INPUT TYPE entirely: a clean, high-resolution (2481x3509, 300 DPI)
+rendered PDF scan with yellow highlighter marks over the fields that
+matter, not a phone photo. Against round 2's phone-photo-tuned ensemble
+it scored WORSE than the phone photo had (0 fields, completely garbled
+raw text) despite being objectively higher quality — no camera blur, no
+lighting variation, no perspective distortion. Investigated the same way
+as round 2 (scoring real tokens across variants, not eyeballing):
 
-So `extract_birth_certificate_fields` now runs a small ENSEMBLE of two
-preprocessing variants and merges per field (keeping whichever variant's
-result has higher confidence for each field independently), instead of
-committing to one preprocessing recipe:
-  - variant "wide": deskew, 2.0x upscale, standard Tesseract PSM.
-  - variant "cropped": deskew, blank out the QR-code and barcode corners
-    (pure visual noise for OCR, confirmed to confuse layout analysis on
-    the real test document), 1.6x upscale, PSM 4 (assumes one column of
-    variable-size text — suits this form's boxed-row layout better than
-    the default "fully automatic" segmentation).
-Both scale factors and the crop fractions are empirical, tuned against
-ONE real document — they are a reasonable default, not a calibrated
-constant; the "cropped" variant's fixed corner fractions are a real,
-known limitation (a differently-framed real submission could have its
-QR/barcode in a different place, or none at all) — but the ensemble's
-own redundancy is the safety net: variant "wide" never crops anything,
-so any field variant "cropped" doesn't help still gets a fair try.
+1. The yellow highlighter measurably hurts recognition on its own —
+   confirmed by neutralizing it (detecting yellow via HSV and painting
+   those regions white before grayscale conversion) as an isolated
+   change.
+2. The bigger effect, found by testing WITHOUT it: denoise + CLAHE +
+   adaptive-threshold — this module's whole preprocessing philosophy,
+   justified in preprocessing.py's own docstring for "raw phone-camera
+   photos" — actively hurts a document that never needed it. A clean
+   PDF render has none of the noise that pipeline exists to fix; forcing
+   it through anyway measurably cost accuracy (best variant with the
+   full pipeline: 2/21 known real tokens; same document, no threshold at
+   all, page-segmentation mode 11 for sparse/scattered form text: 9/21).
+
+So the ensemble gained a third family of variants tuned for this input
+type — yellow-neutralized, little-to-no binarization, PSM 11 — on top of
+(not replacing) round 2's phone-photo variants, since both are real
+inputs this system has to handle (file-validation already accepts PDF
+for birth certificates) and neither family suits the other's input well.
+Yellow-neutralization is applied unconditionally before every variant —
+verified not to hurt the phone-photo case (that document had no
+highlighter) and to measurably help the PDF-scan case.
 
 Still explicitly MVP-quality, and still not a claim of production
-accuracy — an ensemble of two heuristic variants recovering most, not
-all, of one real document's fields is real, verified progress, not a
-solved problem. See the root README's Phase 1/Phase 9 sections.
+accuracy — three preprocessing families covering two real documents is
+real, verified progress on a real, still-open problem, not a solved one.
+See the root README's Phase 1/Phase 9 sections.
 """
 
 from typing import Dict, List, Optional, Tuple, TypedDict
@@ -99,17 +102,44 @@ class _Word(TypedDict):
 # box, most specific first — priority order matters: a specific multi-word
 # phrase is always tried, across every line, before any generic
 # single-word fallback (see module docstring, round 1, bug 2).
+#
+# registry_office/national_number/nationality/informant_role added
+# 2026-09-25 against a second real sample, which highlighted these as the
+# fields that actually matter for identity verification (as opposed to
+# the first sample's father_name/mother_name/family_registry_number,
+# which are real fields on the form but weren't the ones flagged as
+# load-bearing). Kept the originals rather than replacing them — they're
+# still real, present fields, just not this round's focus. "sex", not
+# "gender" — matching the field name given for the DB/consistency-check
+# layer that consumes this; a plain rename, no schema migration needed
+# since extracted fields are stored generically (name/value/confidence),
+# not as typed columns.
 _LABEL_KEYWORDS: Dict[str, List[str]] = {
-    "full_name": ["الاسم ثلاثي", "الاسم"],
+    "registry_office": ["مكتب السجل المدني", "السجل المدني"],
+    "national_number": ["الرقم الوطني"],
+    "full_name": ["الاسم الثلاثي", "الاسم ثلاثي", "الاسم"],
     "date_of_birth_day": ["اليوم"],
     "date_of_birth_month": ["الشهر"],
     "date_of_birth_year": ["السنة"],
     "place_of_birth": ["مكان الولادة", "المحلة"],
-    "gender": ["الجنس"],
+    "sex": ["الجنس"],
+    "nationality": ["جنسيته"],
     "father_name": ["اسم الأب"],
     "mother_name": ["اسم الأم"],
     "family_registry_number": ["رقم قيد العائلة", "قيد العائلة"],
+    # Who REPORTED the birth (e.g. "موظف" = a civil registry employee),
+    # not the birth-certificate holder — not useful for identity
+    # matching, but a real document-authenticity signal: a properly
+    # filled civil registry form has this populated by a real official
+    # capacity. Kept as its own field rather than folded into anything
+    # identity-related, exactly per its actual meaning on the form.
+    "informant_role": ["صفته"],
 }
+
+# Labels for the signature/stamp box — not a text field (see
+# detect_official_stamp below), kept separate from _LABEL_KEYWORDS since
+# it's found the same way but consumed differently (presence, not text).
+_STAMP_LABEL_KEYWORDS = ["توقيع الموظف المختص والختم", "والختم", "الختم"]
 
 _MAX_VERTICAL_GAP_PX = 15
 # 700, not a smaller number — see module docstring round 1, bug 3: the
@@ -124,12 +154,14 @@ def extract_birth_certificate_fields(
     """`image` is the RAW loaded (BGR) image, NOT pre-thresholded — unlike
     every other extractor in this service, this one owns its own
     preprocessing so it can run more than one variant internally (see
-    module docstring, round 2)."""
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    module docstring)."""
+    neutralized_bgr = _neutralize_highlighter(image)
+    gray = cv2.cvtColor(neutralized_bgr, cv2.COLOR_BGR2GRAY)
     gray = deskew(gray)
 
     raw_texts: List[str] = []
-    per_variant_fields: List[List[ExtractedField]] = []
+    per_variant_fields: List[List[Tuple[ExtractedField, int]]] = []
+    per_variant_words: List[List[_Word]] = []
     for variant_image, config, scale in _preprocess_variants(gray):
         raw_text = pytesseract.image_to_string(variant_image, lang=lang, config=config)
         data = pytesseract.image_to_data(
@@ -145,20 +177,56 @@ def extract_birth_certificate_fields(
         # zero fields matched despite Tesseract reading the text perfectly.
         # Normalizing here keeps one set of thresholds valid across every
         # variant regardless of its own scale factor.
-        per_variant_fields.append(_extract_fields_from_data(data, scale))
+        words = _extract_words(data, scale)
+        per_variant_words.append(words)
+        per_variant_fields.append(_extract_fields_from_words(words))
 
     fields = _merge_fields(per_variant_fields)
+
+    stamp_field = _detect_official_stamp(gray, per_variant_words)
+    if stamp_field is not None:
+        fields.append(stamp_field)
+
     combined_raw_text = "\n---\n".join(raw_texts)
     overall_confidence = sum(f.confidence for f in fields) / len(fields) if fields else 0.0
     return combined_raw_text, fields, overall_confidence
 
 
+def _neutralize_highlighter(bgr: np.ndarray) -> np.ndarray:
+    """Paints bright-yellow highlighter marks white before anything else
+    runs — see module docstring, round 3. Detected via HSV (yellow hue
+    ~15-40 in OpenCV's 0-179 range, real highlighter is high-saturation
+    and bright) rather than a fixed color match, so ordinary yellowed
+    paper or a light cream background isn't caught by the same net —
+    those are lower-saturation than an actual marker. Only paints the
+    BRIGHT part of the highlighted region white (value channel > 150) so
+    a dark pen stroke that happens to be highlighted isn't erased along
+    with its background."""
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    yellow_mask = cv2.inRange(hsv, (15, 40, 120), (40, 255, 255))
+    is_highlight_bg = (yellow_mask > 0) & (hsv[:, :, 2] > 150)
+    out = bgr.copy()
+    out[is_highlight_bg] = [255, 255, 255]
+    return out
+
+
 def _preprocess_variants(gray: np.ndarray) -> List[Tuple[np.ndarray, str, float]]:
     """Returns (preprocessed_image, tesseract_config, scale_factor) triples
-    — see module docstring, round 2, for what each variant is for and why
-    neither one alone was enough. `scale_factor` is how much larger than
-    `gray` the returned image is, so the caller can normalize word
-    coordinates back to a consistent scale before comparing gaps."""
+    — see module docstring for what each variant/family is for. Three
+    families now, covering two real, different input types:
+      - "wide"/"cropped": round 2's phone-photo variants (2.0x upscale
+        default PSM; QR/barcode corners blanked, 1.6x upscale, PSM 4).
+      - "clean-scan": round 3's variant for a clean, already-high-
+        resolution PDF render — little to no binarization (that pipeline
+        measurably hurts this input type) and PSM 11 (sparse/scattered
+        text), which suited this form's boxed layout far better than
+        automatic segmentation once the image itself wasn't degraded by
+        an unneeded aggressive threshold.
+    All scale factors, crop fractions, and the choice of PSM per variant
+    are empirical, each tuned against ONE real document of its type —
+    reasonable defaults, not calibrated constants; the ensemble's own
+    redundancy across three families is the safety net for whichever
+    document type actually shows up."""
     h, w = gray.shape
 
     cropped = gray.copy()
@@ -168,6 +236,7 @@ def _preprocess_variants(gray: np.ndarray) -> List[Tuple[np.ndarray, str, float]
     return [
         (_denoise_contrast_threshold(_scale(gray, 2.0)), "", 2.0),
         (_denoise_contrast_threshold(_scale(cropped, 1.6)), "--psm 4", 1.6),
+        (gray, "--psm 11", 1.0),
     ]
 
 
@@ -182,7 +251,8 @@ def _denoise_contrast_threshold(gray: np.ndarray) -> np.ndarray:
     times per document on differently-scaled/cropped inputs, which isn't
     a shape `preprocess_for_ocr`'s single-image contract was built for;
     duplicating ~6 lines was less risky than reshaping a function every
-    other document type also calls)."""
+    other document type also calls). Deliberately NOT applied to the
+    "clean-scan" variant — see module docstring, round 3."""
     denoised = cv2.fastNlMeansDenoising(gray, h=10)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     contrasted = clahe.apply(denoised)
@@ -191,16 +261,13 @@ def _denoise_contrast_threshold(gray: np.ndarray) -> np.ndarray:
     )
 
 
-def _extract_fields_from_data(
-    data: dict, scale: float
-) -> List[Tuple[ExtractedField, int]]:
+def _extract_fields_from_words(words: List[_Word]) -> List[Tuple[ExtractedField, int]]:
     """Each field is paired with the priority-rank of the keyword that
     matched it (0 = the most specific keyword for that field, per
     _LABEL_KEYWORDS' own order) — kept internal to this module, not part
     of the public ExtractedField schema, purely to let _merge_fields
     prefer a specific match over a generic-fallback one (see its own
     docstring for why that has to outrank raw OCR confidence)."""
-    words = _extract_words(data, scale)
     lines = _group_lines(words)
 
     fields: List[Tuple[ExtractedField, int]] = []
@@ -213,11 +280,7 @@ def _extract_fields_from_data(
         # phrase's outermost word. Real bug, found fixing the same code
         # path in arabic_form.py: anchoring on the rightmost word of a
         # multi-word phrase measures the gap from the wrong edge of the
-        # label box, artificially widening it. _MAX_HORIZONTAL_GAP_PX
-        # being 700 here (vs. arabic_form.py's untouched 400) was partly
-        # this same bug's effect, not purely genuine gap measurement —
-        # re-verified against the real document below that min() is still
-        # correct (or better) here, not just carried over blindly.
+        # label box, artificially widening it.
         label_anchor = min(label_words, key=lambda w: w["left"])
         value_words = _find_value_to_left(words, label_words, label_anchor)
         if not value_words:
@@ -242,9 +305,8 @@ def _merge_fields(per_variant_fields: List[List[Tuple[ExtractedField, int]]]) ->
     right field," and a clean read of the wrong region beat a noisier
     read of the right one every time until specificity was made to
     matter more. Each variant still recovers a different, largely
-    non-overlapping subset of real fields (see module docstring, round
-    2), so this stays "union, tie-broken," not "pick the best variant
-    overall.\""""
+    non-overlapping subset of real fields, so this stays "union,
+    tie-broken," not "pick the best variant overall.\""""
     best_by_name: Dict[str, Tuple[ExtractedField, int]] = {}
     for fields in per_variant_fields:
         for field, rank in fields:
@@ -259,6 +321,58 @@ def _merge_fields(per_variant_fields: List[List[Tuple[ExtractedField, int]]]) ->
     # predictable field order in the response regardless of which variant
     # found which field first.
     return [best_by_name[name][0] for name in _LABEL_KEYWORDS if name in best_by_name]
+
+
+def _detect_official_stamp(
+    gray: np.ndarray, per_variant_words: List[List[_Word]]
+) -> Optional[ExtractedField]:
+    """The signature/stamp box (توقيع الموظف المختص والختم) is different in
+    kind from every other field here — it's not text to OCR, it's a
+    presence check: is there ink in that region at all? Anchored on the
+    detected label's own position (same approach as every text field, not
+    a fixed template coordinate), checking the box to the label's left —
+    the same value-box convention as text fields — for what fraction of
+    pixels are dark ink rather than blank paper.
+
+    Returns None if no variant ever found the label at all (can't check a
+    region we don't know the location of) — the caller treats that as "no
+    stamp field reported," not "stamp absent," which is the honest
+    distinction: we don't know, we didn't fail to find one.
+
+    The ink-fraction threshold (2%) is a reasonable starting guess against
+    ONE real document known to have a real stamp in this box — not a
+    calibrated classifier. Confidence is deliberately capped at 0.6,
+    lower than a real text-match's typical confidence, to reflect that
+    this is a heuristic, not OCR reading actual characters."""
+    label_words = None
+    for words in per_variant_words:
+        lines = _group_lines(words)
+        found = _find_label_words(lines, _STAMP_LABEL_KEYWORDS)
+        if found is not None:
+            label_words, _rank = found
+            break
+    if label_words is None:
+        return None
+
+    label_anchor = min(label_words, key=lambda w: w["left"])
+    label_mid_y = label_anchor["top"] + label_anchor["height"] / 2
+    box_top = max(0, int(label_mid_y - 60))
+    box_bottom = min(gray.shape[0], int(label_mid_y + 60))
+    box_right = label_anchor["left"]
+    box_left = max(0, box_right - _MAX_HORIZONTAL_GAP_PX)
+    if box_bottom <= box_top or box_right <= box_left:
+        return None
+
+    region = gray[box_top:box_bottom, box_left:box_right]
+    if region.size == 0:
+        return None
+    ink_fraction = float((region < 140).mean())
+    present = ink_fraction > 0.02
+    return ExtractedField(
+        name="official_stamp_present",
+        value="true" if present else "false",
+        confidence=0.6,
+    )
 
 
 def _extract_words(data: dict, scale: float) -> List[_Word]:
