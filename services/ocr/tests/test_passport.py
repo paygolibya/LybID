@@ -11,10 +11,13 @@ def test_extracts_mrz_fields_from_synthetic_passport():
     raw_text, fields, overall_confidence = extract_passport_fields(image_bytes)
 
     field_names = {f.name for f in fields}
-    assert "number" in field_names, f"MRZ number not found; raw_text={raw_text!r}"
+    # "passport_number", not PassportEye's own "number" — renamed
+    # 2026-09-25 to match the field name specified for the layer that
+    # consumes it. See passport.py's own _MRZ_FIELD_NAMES comment.
+    assert "passport_number" in field_names, f"MRZ number not found; raw_text={raw_text!r}"
     assert "nationality" in field_names
 
-    number_field = next(f for f in fields if f.name == "number")
+    number_field = next(f for f in fields if f.name == "passport_number")
     assert number_field.value.startswith("N1234567")
 
     # The synthetic fixture's MRZ has correct ICAO check digits (see
